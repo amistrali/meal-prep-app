@@ -61,7 +61,7 @@ Ogni elemento: {"name":"string","kcal":number,"prep":number,"tags":["string"],"i
 qty è sempre riferito a 1 porzione.`;
 
 async function callClaudeAPI(userMsg) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
