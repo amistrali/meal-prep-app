@@ -5,11 +5,11 @@ const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
 const FALLBACK_MEALS = [
-  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro perlato",qty:80,unit:"g"}], steps:["Cuoci","Assembla"] },
-  { name:"Quinoa con Ceci e Feta", kcal:420, prep:15, servings:1, tags:["vegetariano"], ingredients:[{name:"Quinoa",qty:70,unit:"g"}], steps:["Cuoci","Mescola"] },
-  { name:"Riso Integrale con Tonno", kcal:450, prep:20, servings:1, tags:["pesce"], ingredients:[{name:"Riso",qty:80,unit:"g"}], steps:["Cuoci","Unisci"] },
+  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico"], ingredients:[{name:"Farro",qty:80,unit:"g"}], steps:["Cuoci","Assembla"] },
+  { name:"Quinoa e Ceci", kcal:420, prep:15, servings:1, tags:["veg"], ingredients:[{name:"Quinoa",qty:70,unit:"g"}], steps:["Cuoci","Mescola"] },
+  { name:"Riso Tonno", kcal:450, prep:20, servings:1, tags:["pesce"], ingredients:[{name:"Riso",qty:80,unit:"g"}], steps:["Cuoci","Unisci"] },
   { name:"Wrap Hummus", kcal:380, prep:10, servings:1, tags:["vegano"], ingredients:[{name:"Tortilla",qty:1,unit:"pz"}], steps:["Farcisci"] },
-  { name:"Pasta Lenticchie", kcal:510, prep:20, servings:1, tags:["vegetariano"], ingredients:[{name:"Pasta",qty:80,unit:"g"}], steps:["Cuoci"] },
+  { name:"Pasta Lenticchie", kcal:510, prep:20, servings:1, tags:["veg"], ingredients:[{name:"Pasta",qty:80,unit:"g"}], steps:["Cuoci"] }
 ];
 
 function getWeekKey(offset = 0) {
@@ -23,10 +23,14 @@ function getWeekKey(offset = 0) {
 function assignVisuals(meals) {
   return meals.map((m, i) => ({
     ...m,
-    id: m.id ?? (Date.now() + i),
+    id: m.id || Date.now() + i,
     color: COLORS[i % COLORS.length],
     emoji: EMOJIS[i % EMOJIS.length]
   }));
+}
+
+function emptyPlan() {
+  return Object.fromEntries(DAYS.map(d => [d, null]));
 }
 
 function buildShoppingList(plan) {
@@ -34,25 +38,13 @@ function buildShoppingList(plan) {
   DAYS.forEach(day => {
     const m = plan?.[day];
     if (!m) return;
-    (m.ingredients || []).forEach(ing => {
-      if (!totals[ing.name]) totals[ing.name] = { name: ing.name, qty: 0, unit: ing.unit };
-      totals[ing.name].qty += ing.qty * (m.servings || 1);
+    (m.ingredients || []).forEach(i => {
+      if (!totals[i.name]) totals[i.name] = { name: i.name, qty: 0, unit: i.unit };
+      totals[i.name].qty += i.qty * (m.servings || 1);
     });
   });
   return Object.values(totals);
 }
-
-function diffLists(prev, curr) {
-  const pm = Object.fromEntries(prev.map(i => [i.name, i]));
-  const cm = Object.fromEntries(curr.map(i => [i.name, i]));
-  return {
-    added: curr.filter(i => !pm[i.name]),
-    removed: prev.filter(i => !cm[i.name]),
-    changed: curr.filter(i => pm[i.name] && pm[i.name].qty !== i.qty)
-  };
-}
-
-const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
 
 async function storageGet(key) {
   try {
@@ -84,12 +76,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
 
-  const [diffModal, setDiffModal] = useState(null);
-  const [archiveDetail, setArchiveDetail] = useState(null);
-
-  const [showPrefs, setShowPrefs] = useState(false);
   const [ready, setReady] = useState(false);
-  const [apiError, setApiError] = useState("");
 
   useEffect(() => {
     Promise.all([
@@ -112,39 +99,32 @@ export default function App() {
 
   const notify = (m) => {
     setNotification(m);
-    setTimeout(() => setNotification(""), 2500);
+    setTimeout(() => setNotification(""), 2000);
   };
 
-  const weekKey = (tab) => tab === "current" ? getWeekKey(0) : getWeekKey(1);
+  const weekKey = (t) => t === "current" ? getWeekKey(0) : getWeekKey(1);
 
-  const getWD = (tab) => {
-    const k = weekKey(tab);
-    return weeks[k] || { plan: emptyPlan(), locked:false, meals:[] };
+  const getWD = () => {
+    const k = weekKey(activeTab);
+    return weeks[k] || { plan: emptyPlan(), meals: [] };
   };
 
-  const generateWeek = async (tab) => {
-    setLoading(true);
-    setLoadingMsg("Generazione...");
-    setApiError("");
-
-    const key = weekKey(tab);
-    const meals = assignVisuals([...FALLBACK_MEALS].slice(0,5));
-    const plan = Object.fromEntries(DAYS.map((d,i)=>[d, {...meals[i]}]));
+  const generateWeek = () => {
+    const key = weekKey(activeTab);
+    const meals = assignVisuals([...FALLBACK_MEALS]);
+    const plan = Object.fromEntries(DAYS.map((d,i)=>[d, meals[i]]));
 
     const newWeeks = {
       ...weeks,
-      [key]: { plan, meals, locked:false }
+      [key]: { plan, meals }
     };
 
     setWeeks(newWeeks);
     persist(newWeeks, archive, prefs);
-
-    setLoading(false);
     notify("Generato");
   };
 
-  const wd = getWD(activeTab);
-  const plan = wd.plan; // IMPORTANT: used in JSX → avoids ESLint removal
+  const wd = getWD();
 
   if (!ready) return <div>Loading...</div>;
 
@@ -155,18 +135,13 @@ export default function App() {
 
       {view === "planner" && (
         <div>
-          <button onClick={() => generateWeek(activeTab)}>
-            Genera
-          </button>
+          <button onClick={generateWeek}>Genera</button>
 
-          {DAYS.map(d => {
-            const meal = plan?.[d];
-            return (
-              <div key={d}>
-                <strong>{d}</strong> {meal?.name || "empty"}
-              </div>
-            );
-          })}
+          {DAYS.map(d => (
+            <div key={d}>
+              <strong>{d}</strong> {wd.plan?.[d]?.name || "—"}
+            </div>
+          ))}
         </div>
       )}
 
@@ -177,6 +152,13 @@ export default function App() {
               {m.name}
             </div>
           ))}
+        </div>
+      )}
+
+      {showRecipe && (
+        <div>
+          <h3>{showRecipe.name}</h3>
+          <button onClick={() => setShowRecipe(null)}>chiudi</button>
         </div>
       )}
 
