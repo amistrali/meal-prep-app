@@ -1,57 +1,51 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState } from "react";
 
-const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
-const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
-const FALLBACK_MEALS = [/* invariato, lo hai già */];
+const FALLBACK_MEALS = [
+  {
+    name:"Bowl di Farro con Pollo",
+    kcal:480,
+    prep:25,
+    tags:["proteico"],
+    ingredients:[{name:"Farro",qty:80,unit:"g"}],
+    steps:["Cuoci il farro","Cuoci il pollo","Assembla"]
+  },
+  {
+    name:"Quinoa Ceci Feta",
+    kcal:420,
+    prep:15,
+    tags:["vegetariano"],
+    ingredients:[{name:"Quinoa",qty:70,unit:"g"}],
+    steps:["Cuoci quinoa","Aggiungi ceci"]
+  },
+  {
+    name:"Riso Tonno",
+    kcal:450,
+    prep:20,
+    tags:["pesce"],
+    ingredients:[{name:"Riso",qty:80,unit:"g"}],
+    steps:["Cuoci riso","Aggiungi tonno"]
+  },
+  {
+    name:"Wrap Vegano",
+    kcal:380,
+    prep:10,
+    tags:["vegano"],
+    ingredients:[{name:"Tortilla",qty:1,unit:"pz"}],
+    steps:["Farcisci","Arrotola"]
+  },
+  {
+    name:"Pasta Lenticchie",
+    kcal:510,
+    prep:20,
+    tags:["legumi"],
+    ingredients:[{name:"Pasta",qty:80,unit:"g"}],
+    steps:["Cuoci pasta","Condisci"]
+  }
+];
 
-function getWeekKey(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset * 7);
-  const jan4 = new Date(d.getFullYear(), 0, 4);
-  const wn = Math.ceil(((d - jan4) / 86400000 + jan4.getDay() + 1) / 7);
-  return `${d.getFullYear()}-W${String(wn).padStart(2,"0")}`;
-}
-
-function assignVisuals(meals) {
-  return meals.map((m, i) => ({
-    ...m,
-    id: m.id ?? (Date.now() + i + Math.random()),
-    color: COLORS[i % COLORS.length],
-    emoji: EMOJIS[i % EMOJIS.length]
-  }));
-}
-
-function buildShoppingList(plan) {
-  const totals = {};
-  DAYS.forEach(day => {
-    const m = plan[day];
-    if (!m) return;
-    const s = m.servings || 1;
-    (m.ingredients || []).forEach(ing => {
-      if (!totals[ing.name]) totals[ing.name] = { name: ing.name, qty: 0, unit: ing.unit };
-      totals[ing.name].qty += ing.qty * s;
-    });
-  });
-  return Object.values(totals).map(i => ({ ...i, qty: Math.round(i.qty * 10) / 10 }));
-}
-
-function diffLists(prev, curr) {
-  const pm = Object.fromEntries(prev.map(i => [i.name, i]));
-  const cm = Object.fromEntries(curr.map(i => [i.name, i]));
-  return {
-    added: curr.filter(i => !pm[i.name]),
-    removed: prev.filter(i => !cm[i.name]),
-    changed: curr.filter(i => pm[i.name] && pm[i.name].qty !== i.qty).map(i => ({ ...i, prevQty: pm[i.name].qty }))
-  };
-}
-
-const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
-
-// ─────────────────────────────────────────────────────────────
-// 🔧 CLAUDE API (FIXED → via backend proxy)
-// ─────────────────────────────────────────────────────────────
+// ✅ FIX: chiamata backend (no CORS)
 async function callClaudeAPI(userMsg) {
   const response = await fetch("/api/claude", {
     method: "POST",
@@ -63,123 +57,72 @@ async function callClaudeAPI(userMsg) {
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(err || `HTTP ${response.status}`);
+    throw new Error(err || "Errore API");
   }
 
   const data = await response.json();
 
-  // backend deve restituire già "content"
   const text = (data.content || [])
     .filter(b => b.type === "text")
     .map(b => b.text)
     .join("");
 
-  if (!text) throw new Error("Risposta vuota");
-
   const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("Nessun JSON trovato");
+  if (!match) throw new Error("JSON non trovato");
 
   return JSON.parse(match[0]);
 }
 
-// ─────────────────────────────────────────────────────────────
-// STORAGE
-// ─────────────────────────────────────────────────────────────
-async function storageGet(key) {
-  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
-}
-async function storageSet(key, val) {
-  try { await window.storage.set(key, JSON.stringify(val)); } catch {}
-}
-
-// ─────────────────────────────────────────────────────────────
-// APP
-// ─────────────────────────────────────────────────────────────
 export default function App() {
-  const [weeks, setWeeks] = useState({});
-  const [archive, setArchive] = useState([]);
-  const [prefs, setPrefs] = useState("");
-  const [activeTab, setActiveTab] = useState("current");
-  const [view, setView] = useState("planner");
-  const [showRecipe, setShowRecipe] = useState(null);
-  const [notification, setNotification] = useState("");
+  const [plan, setPlan] = useState({});
   const [loading, setLoading] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("");
-  const [diffModal, setDiffModal] = useState(null);
-  const [archiveDetail, setArchiveDetail] = useState(null);
-  const [showPrefs, setShowPrefs] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [apiError, setApiError] = useState("");
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    Promise.all([
-      storageGet("mp-weeks"),
-      storageGet("mp-archive"),
-      storageGet("mp-prefs")
-    ]).then(([w, a, p]) => {
-      if (w) setWeeks(w);
-      if (a) setArchive(a);
-      if (p) setPrefs(p);
-      setReady(true);
-    });
-  }, []);
-
-  const persist = useCallback((newWeeks, newArchive, newPrefs) => {
-    storageSet("mp-weeks", newWeeks);
-    storageSet("mp-archive", newArchive);
-    storageSet("mp-prefs", newPrefs);
-  }, []);
-
-  const notify = (msg) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(""), 3000);
-  };
-
-  const weekKey = (tab) => tab === "current" ? getWeekKey(0) : getWeekKey(1);
-  const getWD = (tab) => weeks[weekKey(tab)] || { plan: emptyPlan(), locked: false, lockedList: null, meals: [] };
-
-  // ─────────────────────────────────────────────────────────────
-  // GENERATE (UNCHANGED LOGIC, FIXED API)
-  // ─────────────────────────────────────────────────────────────
-  const generateWeek = async (tab) => {
+  const generateWeek = async () => {
     setLoading(true);
-    setApiError("");
-    setLoadingMsg("Generazione ricette...");
+    setError("");
 
-    const userMsg =
-      `Genera 5 ricette diverse per pranzo da preparare in anticipo.` +
-      (prefs ? ` Preferenze: ${prefs}.` : "") +
-      ` Devono essere tutte diverse per ingrediente principale.`;
-
-    let rawMeals;
-    let usedFallback = false;
+    let meals;
 
     try {
-      rawMeals = await callClaudeAPI(userMsg);
-    } catch (err) {
-      console.error(err);
-      rawMeals = FALLBACK_MEALS;
-      usedFallback = true;
+      meals = await callClaudeAPI(
+        "Genera 5 ricette meal prep diverse"
+      );
+    } catch (e) {
+      console.error(e);
+      meals = FALLBACK_MEALS;
+      setError("API non disponibile, uso fallback");
     }
 
-    const meals = assignVisuals(rawMeals.slice(0, 5));
-    const plan = Object.fromEntries(DAYS.map((d, i) => [d, { ...meals[i], servings: 1 }]));
-    const key = weekKey(tab);
+    const newPlan = {};
+    DAYS.forEach((d, i) => {
+      newPlan[d] = meals[i];
+    });
 
-    const newWeeks = {
-      ...weeks,
-      [key]: { plan, locked: false, lockedList: null, meals }
-    };
-
-    setWeeks(newWeeks);
-    persist(newWeeks, archive, prefs);
-
+    setPlan(newPlan);
     setLoading(false);
-    setLoadingMsg("");
-
-    notify(usedFallback ? "Fallback attivato" : "Piano generato");
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // REST OF YOUR APP = IDENTICAL (UI NON TOCCATA)
-  // ─────────────────────────────────────────────────────────────
+  return (
+    <div style={{ padding: 20, fontFamily: "Arial" }}>
+      <h1>Meal Prep Planner</h1>
+
+      <button onClick={generateWeek} disabled={loading}>
+        {loading ? "Caricamento..." : "Genera Piano"}
+      </button>
+
+      {error && (
+        <p style={{ color: "orange" }}>{error}</p>
+      )}
+
+      <div style={{ marginTop: 20 }}>
+        {DAYS.map(day => (
+          <div key={day} style={{ marginBottom: 10 }}>
+            <strong>{day}:</strong>{" "}
+            {plan[day]?.name || "—"}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
