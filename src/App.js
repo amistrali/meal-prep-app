@@ -65,11 +65,16 @@ async function callClaudeAPI(userMsg) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 3000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMsg }],
-    }),
+  "model": "claude-sonnet-4-20250514",
+  "max_tokens": 3000,
+  "system": "Sei un nutrizionista esperto in meal prep per pranzi di ufficio. Genera esattamente 5 ricette DIVERSE tra loro per una settimana lavorativa. Ogni ricetta: preparabile in anticipo, conservabile 3-4 giorni in frigo, max 30 min di prep, equilibrata e sana, trasportabile in contenitore. Le 5 devono coprire categorie diverse: cereali integrali, legumi, pesce, carne magra, vegano. Rispondi esclusivamente con un array JSON valido, nessun testo prima o dopo, nessun markdown. Ogni elemento: {\"name\":\"string\",\"kcal\":number,\"prep\":number,\"tags\":[\"string\"],\"ingredients\":[{\"name\":\"string\",\"qty\":number,\"unit\":\"string\"}],\"steps\":[\"string\"]}. qty è sempre riferito a 1 porzione.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Genera 5 ricette diverse per pranzo da preparare in anticipo. Le 5 ricette devono essere completamente diverse tra loro per ingrediente principale."
+    }
+  ]
+}),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json();
