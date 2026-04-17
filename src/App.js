@@ -4,15 +4,15 @@ const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
-// Fallback meals if API unavailable
 const FALLBACK_MEALS = [
-  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro perlato",qty:80,unit:"g"},{name:"Petto di pollo",qty:120,unit:"g"},{name:"Zucchine",qty:1,unit:"pz"},{name:"Pomodorini",qty:100,unit:"g"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci il farro 20 min in acqua salata, scola e raffredda.","Taglia il pollo a cubetti, saltalo con olio e timo 8 min.","Grigliale le zucchine a rondelle 3-4 min per lato.","Assembla il bowl e condisci con olio e limone.","Conserva in contenitore ermetico fino a 3 giorni."] },
+  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro perlato",qty:80,unit:"g"},{name:"Petto di pollo",qty:120,unit:"g"},{name:"Zucchine",qty:1,unit:"pz"},{name:"Pomodorini",qty:100,unit:"g"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci il farro 20 min in acqua salata, scola e raffredda.","Taglia il pollo a cubetti, saltalo con olio e timo 8 min.","Grigliale le zucchine 3-4 min per lato.","Assembla il bowl e condisci con olio e limone.","Conserva in contenitore ermetico fino a 3 giorni."] },
   { name:"Quinoa con Ceci e Feta", kcal:420, prep:15, servings:1, tags:["vegetariano","legumi"], ingredients:[{name:"Quinoa",qty:70,unit:"g"},{name:"Ceci cotti",qty:150,unit:"g"},{name:"Feta",qty:50,unit:"g"},{name:"Cetriolo",qty:0.5,unit:"pz"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci la quinoa in acqua 2:1 per 15 min, raffredda.","Taglia cetriolo e peperone a cubetti.","Mescola tutto con feta sbriciolata.","Condisci con olio e aceto di mele.","Conserva 3-4 giorni in frigo."] },
-  { name:"Riso Integrale con Tonno", kcal:450, prep:20, servings:1, tags:["pesce","omega-3"], ingredients:[{name:"Riso integrale",qty:80,unit:"g"},{name:"Tonno al naturale",qty:130,unit:"g"},{name:"Edamame",qty:80,unit:"g"},{name:"Mais",qty:50,unit:"g"},{name:"Salsa di soia",qty:1,unit:"cucchiaino"}], steps:["Cuoci il riso integrale 30-35 min.","Scuoci gli edamame 3 min.","Spezzetta il tonno con una forchetta.","Assembla con soia e zenzero.","Cospargi di semi di sesamo."] },
+  { name:"Riso Integrale con Tonno", kcal:450, prep:20, servings:1, tags:["pesce","omega-3"], ingredients:[{name:"Riso integrale",qty:80,unit:"g"},{name:"Tonno al naturale",qty:130,unit:"g"},{name:"Edamame",qty:80,unit:"g"},{name:"Mais",qty:50,unit:"g"},{name:"Salsa di soia",qty:1,unit:"cucchiaino"}], steps:["Cuoci il riso integrale 30-35 min.","Cuoci gli edamame 3 min.","Spezzetta il tonno con una forchetta.","Assembla con soia e zenzero.","Cospargi di semi di sesamo."] },
   { name:"Wrap con Hummus e Verdure", kcal:380, prep:10, servings:1, tags:["vegano","veloce"], ingredients:[{name:"Tortilla integrale",qty:1,unit:"pz"},{name:"Hummus",qty:80,unit:"g"},{name:"Carote",qty:1,unit:"pz"},{name:"Spinaci",qty:40,unit:"g"},{name:"Avocado",qty:0.5,unit:"pz"}], steps:["Stendi l'hummus sulla tortilla.","Aggiungi spinaci, carote grattugiate e avocado.","Spremi il limone sopra.","Arrotola stretto e taglia a metà.","Avvolgi nella pellicola, si conserva 1 giorno."] },
   { name:"Pasta Lenticchie e Pesto Rucola", kcal:510, prep:20, servings:1, tags:["vegetariano","proteico"], ingredients:[{name:"Pasta di lenticchie",qty:80,unit:"g"},{name:"Rucola",qty:40,unit:"g"},{name:"Parmigiano",qty:20,unit:"g"},{name:"Noci",qty:20,unit:"g"},{name:"Olio EVO",qty:2,unit:"cucchiai"}], steps:["Cuoci la pasta 1 min meno del dovuto.","Frulla rucola, noci, parmigiano e olio.","Condisci la pasta con il pesto.","Aggiungi i ciliegini tagliati.","Conserva 2 giorni in frigo."] },
 ];
 
+// ── UTILS ──────────────────────────────────────────────────────────────────
 function getWeekKey(offset = 0) {
   const d = new Date();
   d.setDate(d.getDate() + offset * 7);
@@ -40,18 +40,42 @@ function buildShoppingList(plan) {
 }
 
 function diffLists(prev, curr) {
-  const pm = Object.fromEntries(prev.map(i => [i.name, i]));
-  const cm = Object.fromEntries(curr.map(i => [i.name, i]));
+  const pm = Object.fromEntries((prev||[]).map(i => [i.name, i]));
+  const cm = Object.fromEntries((curr||[]).map(i => [i.name, i]));
   return {
     added: curr.filter(i => !pm[i.name]),
-    removed: prev.filter(i => !cm[i.name]),
+    removed: (prev||[]).filter(i => !cm[i.name]),
     changed: curr.filter(i => pm[i.name] && pm[i.name].qty !== i.qty).map(i => ({ ...i, prevQty: pm[i.name].qty }))
   };
 }
 
 const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
 
-// ── CLAUDE API CALL ────────────────────────────────────────────────────────
+// ── STORAGE: usa localStorage su Vercel, window.storage nell'anteprima Claude ──
+const storage = {
+  async get(key) {
+    // Prova prima window.storage (anteprima Claude)
+    if (typeof window !== "undefined" && window.storage) {
+      try {
+        const r = await window.storage.get(key);
+        return r ? JSON.parse(r.value) : null;
+      } catch {}
+    }
+    // Fallback su localStorage (Vercel/browser standard)
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : null;
+    } catch { return null; }
+  },
+  async set(key, val) {
+    if (typeof window !== "undefined" && window.storage) {
+      try { await window.storage.set(key, JSON.stringify(val)); return; } catch {}
+    }
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  }
+};
+
+// ── API ────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei un nutrizionista esperto in meal prep per pranzi di ufficio.
 Genera esattamente 5 ricette DIVERSE tra loro per una settimana lavorativa.
 Ogni ricetta: preparabile in anticipo, conservabile 3-4 giorni in frigo, max 30 min di prep, equilibrata e sana, trasportabile in contenitore.
@@ -75,7 +99,6 @@ async function callClaudeAPI(userMsg) {
   const data = await response.json();
   const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
   if (!text) throw new Error("Risposta vuota");
-  // Extract JSON array robustly
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) throw new Error("Nessun JSON trovato");
   const parsed = JSON.parse(match[0]);
@@ -83,20 +106,13 @@ async function callClaudeAPI(userMsg) {
   return parsed;
 }
 
-// ── STORAGE ────────────────────────────────────────────────────────────────
-async function storageGet(key) {
-  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
-}
-async function storageSet(key, val) {
-  try { await window.storage.set(key, JSON.stringify(val)); } catch {}
-}
-
 // ── APP ────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [weeks, setWeeks] = useState({});        // weekKey -> {plan, locked, lockedList, meals}
-  const [archive, setArchive] = useState([]);    // [{weekKey, plan, meals, likedIds}]
+  const [weeks, setWeeks] = useState({});
+  const [archive, setArchive] = useState([]);
   const [prefs, setPrefs] = useState("");
-  const [activeTab, setActiveTab] = useState("current");  // current | next
+  const [prefsHistory, setPrefsHistory] = useState([]); // FIX 3: storico preferenze
+  const [activeTab, setActiveTab] = useState("current");
   const [view, setView] = useState("planner");
   const [showRecipe, setShowRecipe] = useState(null);
   const [notification, setNotification] = useState("");
@@ -108,20 +124,28 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [apiError, setApiError] = useState("");
 
-  // Load persisted state
+  // Load all persisted state on mount
   useEffect(() => {
-    Promise.all([storageGet("mp-weeks"), storageGet("mp-archive"), storageGet("mp-prefs")]).then(([w, a, p]) => {
+    Promise.all([
+      storage.get("mp-weeks"),
+      storage.get("mp-archive"),
+      storage.get("mp-prefs"),
+      storage.get("mp-prefs-history"),
+    ]).then(([w, a, p, ph]) => {
       if (w) setWeeks(w);
       if (a) setArchive(a);
       if (p) setPrefs(p);
+      if (ph) setPrefsHistory(ph);
       setReady(true);
     });
   }, []);
 
-  const persist = useCallback((newWeeks, newArchive, newPrefs) => {
-    storageSet("mp-weeks", newWeeks);
-    storageSet("mp-archive", newArchive);
-    storageSet("mp-prefs", newPrefs);
+  // FIX 1: persist accetta anche archivio opzionale per aggiornarlo in sincronia
+  const persist = useCallback((newWeeks, newArchive, newPrefs, newPrefsHistory) => {
+    storage.set("mp-weeks", newWeeks);
+    storage.set("mp-archive", newArchive);
+    storage.set("mp-prefs", newPrefs);
+    if (newPrefsHistory !== undefined) storage.set("mp-prefs-history", newPrefsHistory);
   }, []);
 
   const notify = (msg) => { setNotification(msg); setTimeout(() => setNotification(""), 3000); };
@@ -129,14 +153,43 @@ export default function App() {
   const weekKey = (tab) => tab === "current" ? getWeekKey(0) : getWeekKey(1);
   const getWD = (tab) => weeks[weekKey(tab)] || { plan: emptyPlan(), locked: false, lockedList: null, meals: [] };
 
+  // FIX 1 + 2: ogni volta che il piano della settimana corrente cambia,
+  // aggiorna anche l'archivio se quella settimana è già archiviata
+  const updateWeeks = useCallback((newWeeks, currentArchive, currentPrefs, currentPrefsHistory) => {
+    const currentKey = getWeekKey(0);
+    const currentWD = newWeeks[currentKey];
+    let newArchive = currentArchive;
+
+    if (currentWD) {
+      const archivedIdx = currentArchive.findIndex(a => a.weekKey === currentKey);
+      if (archivedIdx >= 0) {
+        // FIX 1: aggiorna la settimana già archiviata con i dati più recenti
+        newArchive = currentArchive.map((a, idx) =>
+          idx === archivedIdx
+            ? { ...a, plan: currentWD.plan, meals: currentWD.meals || [] }
+            : a
+        );
+        setArchive(newArchive);
+      }
+    }
+
+    setWeeks(newWeeks);
+    persist(newWeeks, newArchive, currentPrefs, currentPrefsHistory);
+    return newArchive;
+  }, [persist]);
+
   // ── GENERATE ──────────────────────────────────────────────────────────────
   const generateWeek = async (tab) => {
     setLoading(true);
     setApiError("");
     setLoadingMsg("Sto generando 5 ricette uniche per la tua settimana...");
-    
-    const likedNames = archive.flatMap(a => (a.likedIds || []).map(id => a.meals?.find(m => m.id === id)?.name).filter(Boolean));
-    const likedCtx = likedNames.length > 0 ? ` L'utente apprezza: ${likedNames.slice(0, 8).join(", ")}. Ispirati a questi gusti.` : "";
+
+    const likedNames = archive.flatMap(a =>
+      (a.likedIds || []).map(id => a.meals?.find(m => m.id === id)?.name).filter(Boolean)
+    );
+    const likedCtx = likedNames.length > 0
+      ? ` L'utente apprezza: ${likedNames.slice(0, 8).join(", ")}. Ispirati a questi gusti.`
+      : "";
     const userMsg = `Genera 5 ricette diverse per pranzo da preparare in anticipo.${prefs ? " Preferenze/intolleranze: " + prefs + "." : ""}${likedCtx} Le 5 ricette devono essere completamente diverse tra loro per ingrediente principale.`;
 
     let rawMeals;
@@ -144,8 +197,7 @@ export default function App() {
 
     try {
       rawMeals = await callClaudeAPI(userMsg);
-    } catch (err) {
-      // Use fallback meals if API fails
+    } catch {
       rawMeals = [...FALLBACK_MEALS].sort(() => Math.random() - 0.5);
       usedFallback = true;
     }
@@ -153,13 +205,22 @@ export default function App() {
     const meals = assignVisuals(rawMeals.slice(0, 5));
     const plan = Object.fromEntries(DAYS.map((d, i) => [d, { ...meals[i], servings: 1 }]));
     const key = weekKey(tab);
+
+    // FIX 3: salva la preferenza nello storico se non vuota e non già presente
+    let newPrefsHistory = prefsHistory;
+    if (prefs.trim() && !prefsHistory.includes(prefs.trim())) {
+      newPrefsHistory = [prefs.trim(), ...prefsHistory].slice(0, 10);
+      setPrefsHistory(newPrefsHistory);
+    }
+
     const newWeeks = { ...weeks, [key]: { plan, locked: false, lockedList: null, meals } };
-    setWeeks(newWeeks);
-    persist(newWeeks, archive, prefs);
+    updateWeeks(newWeeks, archive, prefs, newPrefsHistory);
+
     setLoading(false);
     setLoadingMsg("");
+
     if (usedFallback) {
-      setApiError("⚠️ API non raggiungibile: ho caricato ricette di esempio. Per ricette AI personalizzate l'app deve essere pubblicata online (Vercel/Netlify).");
+      setApiError("⚠️ API non raggiungibile: ho caricato ricette di esempio. Verifica che il file api/claude.js sia presente e che la variabile ANTHROPIC_KEY sia impostata su Vercel.");
       notify("📋 Piano caricato con ricette di esempio");
     } else {
       notify("✨ Piano generato con 5 ricette uniche!");
@@ -172,15 +233,17 @@ export default function App() {
     if (wd.locked) { notify("🔒 Sblocca prima di modificare."); return; }
     const inPlan = DAYS.map(d => wd.plan[d]?.id).filter(Boolean);
     const spare = (wd.meals || []).filter(m => m.id && !inPlan.includes(m.id));
+
     if (spare.length > 0) {
       const pick = spare[Math.floor(Math.random() * spare.length)];
       const newPlan = { ...wd.plan, [day]: { ...pick, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
-      setWeeks(newWeeks); persist(newWeeks, archive, prefs);
-      notify("🔄 Sostituita con: " + pick.name); return;
+      updateWeeks(newWeeks, archive, prefs, prefsHistory);
+      notify("🔄 Sostituita con: " + pick.name);
+      return;
     }
-    // Generate one new via API
+
     setLoading(true); setLoadingMsg("Cerco una ricetta alternativa...");
     const currentNames = DAYS.map(d => wd.plan[d]?.name).filter(Boolean).join(", ");
     try {
@@ -190,15 +253,14 @@ export default function App() {
       const newPlan = { ...wd.plan, [day]: { ...meal, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan, meals: newMeals } };
-      setWeeks(newWeeks); persist(newWeeks, archive, prefs);
+      updateWeeks(newWeeks, archive, prefs, prefsHistory);
       notify("🔄 Sostituita con: " + meal.name);
     } catch {
-      // swap with random fallback
       const fb = assignVisuals([FALLBACK_MEALS[Math.floor(Math.random() * FALLBACK_MEALS.length)]])[0];
       const newPlan = { ...wd.plan, [day]: { ...fb, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
-      setWeeks(newWeeks); persist(newWeeks, archive, prefs);
+      updateWeeks(newWeeks, archive, prefs, prefsHistory);
       notify("🔄 Sostituita con ricetta di esempio.");
     }
     setLoading(false); setLoadingMsg("");
@@ -212,7 +274,7 @@ export default function App() {
     const newPlan = { ...wd.plan, [day]: { ...meal, servings: Math.max(1, Math.min(10, n)) } };
     const key = weekKey(tab);
     const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
-    setWeeks(newWeeks); persist(newWeeks, archive, prefs);
+    updateWeeks(newWeeks, archive, prefs, prefsHistory);
   };
 
   // ── LOCK / UNLOCK ─────────────────────────────────────────────────────────
@@ -225,7 +287,7 @@ export default function App() {
     }
     const key = weekKey(tab);
     const newWeeks = { ...weeks, [key]: { ...wd, locked: true, lockedList: sl } };
-    setWeeks(newWeeks); persist(newWeeks, archive, prefs);
+    updateWeeks(newWeeks, archive, prefs, prefsHistory);
     notify("🔒 Settimana bloccata!");
   };
 
@@ -233,7 +295,7 @@ export default function App() {
     const wd = getWD(tab);
     const key = weekKey(tab);
     const newWeeks = { ...weeks, [key]: { ...wd, locked: false } };
-    setWeeks(newWeeks); persist(newWeeks, archive, prefs);
+    updateWeeks(newWeeks, archive, prefs, prefsHistory);
     notify("🔓 Settimana sbloccata.");
   };
 
@@ -243,7 +305,8 @@ export default function App() {
     const wd = getWD(tab);
     if (archive.find(a => a.weekKey === key)) { notify("Già archiviata."); return; }
     const newArchive = [{ weekKey: key, plan: wd.plan, meals: wd.meals || [], likedIds: [] }, ...archive];
-    setArchive(newArchive); persist(weeks, newArchive, prefs);
+    setArchive(newArchive);
+    persist(weeks, newArchive, prefs, prefsHistory);
     notify("📦 Settimana archiviata!");
   };
 
@@ -253,11 +316,16 @@ export default function App() {
       const liked = a.likedIds || [];
       return { ...a, likedIds: liked.includes(mealId) ? liked.filter(id => id !== mealId) : [...liked, mealId] };
     });
-    setArchive(newArchive); persist(weeks, newArchive, prefs);
+    setArchive(newArchive);
+    persist(weeks, newArchive, prefs, prefsHistory);
   };
 
   // ── RENDER ────────────────────────────────────────────────────────────────
-  if (!ready) return <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#6B5D4F", fontSize:16 }}>Caricamento...</div>;
+  if (!ready) return (
+    <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#6B5D4F", fontSize:16 }}>
+      Caricamento...
+    </div>
+  );
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", gap:20 }}>
@@ -279,10 +347,8 @@ export default function App() {
     <div style={{ minHeight:"100vh", background:"#F5F0E8", fontFamily:"Georgia,serif" }}>
       <div style={{ position:"fixed", inset:0, backgroundImage:"radial-gradient(circle at 20% 50%,rgba(212,169,106,.08),transparent 60%),radial-gradient(circle at 80% 20%,rgba(123,175,142,.08),transparent 60%)", pointerEvents:"none" }} />
 
-      {/* Toast */}
       {notification && <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", background:"#2C2C2C", color:"#F5F0E8", padding:"10px 22px", borderRadius:40, fontSize:13, zIndex:9999, boxShadow:"0 4px 20px rgba(0,0,0,.25)", whiteSpace:"nowrap" }}>{notification}</div>}
 
-      {/* Diff modal */}
       {diffModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={() => setDiffModal(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:20, padding:28, maxWidth:460, width:"100%", boxShadow:"0 16px 48px rgba(0,0,0,.25)" }}>
@@ -290,13 +356,12 @@ export default function App() {
             {diffModal.added.length > 0 && <><p style={{ fontSize:11, letterSpacing:2, color:"#7BAF8E", textTransform:"uppercase", margin:"0 0 6px" }}>Aggiunti</p>{diffModal.added.map(i=><div key={i.name} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #F0EBE0", fontSize:13 }}><span style={{color:"#7BAF8E"}}>+ {i.name}</span><span>{i.qty} {i.unit}</span></div>)}</>}
             {diffModal.removed.length > 0 && <><p style={{ fontSize:11, letterSpacing:2, color:"#C47A7A", textTransform:"uppercase", margin:"12px 0 6px" }}>Rimossi</p>{diffModal.removed.map(i=><div key={i.name} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #F0EBE0", fontSize:13 }}><span style={{color:"#C47A7A"}}>− {i.name}</span><span style={{color:"#B0A090"}}>{i.qty} {i.unit}</span></div>)}</>}
             {diffModal.changed.length > 0 && <><p style={{ fontSize:11, letterSpacing:2, color:"#D4A96A", textTransform:"uppercase", margin:"12px 0 6px" }}>Quantità cambiate</p>{diffModal.changed.map(i=><div key={i.name} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid #F0EBE0", fontSize:13 }}><span>{i.name}</span><span style={{color:"#D4A96A"}}>{i.prevQty}→{i.qty} {i.unit}</span></div>)}</>}
-            {!diffModal.added.length && !diffModal.removed.length && !diffModal.changed.length && <p style={{color:"#9A8A72",fontSize:13}}>Nessuna variazione rispetto all'ultimo blocco.</p>}
+            {!diffModal.added.length && !diffModal.removed.length && !diffModal.changed.length && <p style={{color:"#9A8A72",fontSize:13}}>Nessuna variazione.</p>}
             <button onClick={() => setDiffModal(null)} style={{ marginTop:18, padding:"9px 22px", borderRadius:40, border:"none", background:"#2C2C2C", color:"#fff", fontSize:13, cursor:"pointer", fontFamily:"Georgia,serif" }}>Chiudi</button>
           </div>
         </div>
       )}
 
-      {/* Header */}
       <header style={{ padding:"22px 24px 0", display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
         <div>
           <div style={{ fontSize:10, letterSpacing:4, color:"#9A8A72", textTransform:"uppercase", marginBottom:2 }}>Meal Prep Studio</div>
@@ -313,11 +378,10 @@ export default function App() {
 
       <main style={{ padding:"16px 24px 48px", maxWidth:900, margin:"0 auto" }}>
 
-        {/* Week tabs + lock controls */}
         {view !== "archivio" && (
           <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
             {["current","next"].map(t => (
-              <button key={t} onClick={() => setActiveTab(t)} style={{ padding:"7px 16px", borderRadius:40, border:activeTab===t?"none":"1.5px solid #C8BBA8", background:activeTab===t?"#4A7A6A":"transparent", color:activeTab===t?"#fff":"#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", gap:4, display:"flex", alignItems:"center" }}>
+              <button key={t} onClick={() => setActiveTab(t)} style={{ padding:"7px 16px", borderRadius:40, border:activeTab===t?"none":"1.5px solid #C8BBA8", background:activeTab===t?"#4A7A6A":"transparent", color:activeTab===t?"#fff":"#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", display:"flex", alignItems:"center", gap:4 }}>
                 {wLabel(t)} {getWD(t).locked ? "🔒" : ""}
               </button>
             ))}
@@ -332,10 +396,7 @@ export default function App() {
           </div>
         )}
 
-        {/* API error banner */}
-        {apiError && (
-          <div style={{ background:"#FFF8EC", border:"1.5px solid #EDD4A0", borderRadius:12, padding:"10px 16px", fontSize:12, color:"#8A6A2A", marginBottom:14, lineHeight:1.5 }}>{apiError}</div>
-        )}
+        {apiError && <div style={{ background:"#FFF8EC", border:"1.5px solid #EDD4A0", borderRadius:12, padding:"10px 16px", fontSize:12, color:"#8A6A2A", marginBottom:14, lineHeight:1.5 }}>{apiError}</div>}
 
         {/* ── PLANNER ── */}
         {view === "planner" && (
@@ -351,13 +412,26 @@ export default function App() {
               )}
             </div>
 
+            {/* FIX 3: Preferenze con storico */}
             {showPrefs && !locked && (
               <div style={{ background:"#fff", borderRadius:12, padding:"13px 16px", border:"1.5px solid #EDE6D6", marginBottom:12 }}>
                 <label style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", display:"block", marginBottom:6 }}>Preferenze / intolleranze</label>
-                <div style={{ display:"flex", gap:8 }}>
-                  <input value={prefs} onChange={e => { setPrefs(e.target.value); persist(weeks, archive, e.target.value); }} placeholder="es. vegetariano, senza glutine, no pesce..." style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1.5px solid #C8BBA8", background:"#FDFAF5", fontSize:13, color:"#2C2C2C", fontFamily:"Georgia,serif", outline:"none" }} />
+                <div style={{ display:"flex", gap:8, marginBottom: prefsHistory.length > 0 ? 10 : 0 }}>
+                  <input value={prefs} onChange={e => { setPrefs(e.target.value); persist(weeks, archive, e.target.value, prefsHistory); }} placeholder="es. vegetariano, senza glutine, no pesce..." style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1.5px solid #C8BBA8", background:"#FDFAF5", fontSize:13, color:"#2C2C2C", fontFamily:"Georgia,serif", outline:"none" }} />
                   <button onClick={() => { setShowPrefs(false); generateWeek(activeTab); }} style={{ padding:"8px 14px", borderRadius:8, border:"none", background:"#2C2C2C", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>Applica</button>
                 </div>
+                {prefsHistory.length > 0 && (
+                  <div>
+                    <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:6 }}>Usate in precedenza</div>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {prefsHistory.map((p, i) => (
+                        <button key={i} onClick={() => setPrefs(p)} style={{ padding:"4px 10px", borderRadius:20, border:"1.5px solid #C8BBA8", background: prefs === p ? "#F5F0E8" : "transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer", fontFamily:"Georgia,serif" }}>
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -388,7 +462,6 @@ export default function App() {
                               {meal.tags?.slice(0,1).map(t=><span key={t} style={{ fontSize:9, padding:"1px 6px", borderRadius:20, background:meal.color+"22", color:meal.color }}>{t}</span>)}
                             </div>
                           </div>
-                          {/* Servings */}
                           <div style={{ display:"flex", alignItems:"center", gap:3, background:"#F5F0E8", borderRadius:20, padding:"2px 6px", flexShrink:0 }}>
                             <button onClick={() => setServings(activeTab, day, (meal.servings||1)-1)} disabled={locked} style={{ width:20, height:20, borderRadius:"50%", border:"none", background:locked?"transparent":"#E8E0D0", color:"#6B5D4F", cursor:locked?"default":"pointer", fontSize:13, padding:0, lineHeight:1 }}>−</button>
                             <span style={{ fontSize:11, color:"#2C2C2C", minWidth:14, textAlign:"center" }}>{meal.servings||1}</span>
@@ -397,7 +470,7 @@ export default function App() {
                           <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                             <button onClick={() => { setShowRecipe(meal); setView("ricette"); }} style={{ padding:"4px 9px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer" }}>Ricetta</button>
                             {!locked && <button onClick={() => swapMeal(activeTab, day)} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#5A8A70", fontSize:12, cursor:"pointer" }}>🔄</button>}
-                            {!locked && <button onClick={() => { const np={...plan,[day]:null}; const key=weekKey(activeTab); const nw={...weeks,[key]:{...wd,plan:np}}; setWeeks(nw); persist(nw,archive,prefs); }} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #F0C4C4", background:"transparent", color:"#C47A7A", fontSize:11, cursor:"pointer" }}>✕</button>}
+                            {!locked && <button onClick={() => { const np={...plan,[day]:null}; const key=weekKey(activeTab); const nw={...weeks,[key]:{...wd,plan:np}}; updateWeeks(nw,archive,prefs,prefsHistory); }} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #F0C4C4", background:"transparent", color:"#C47A7A", fontSize:11, cursor:"pointer" }}>✕</button>}
                           </div>
                         </div>
                       ) : (
@@ -467,7 +540,8 @@ export default function App() {
             {locked && <div style={{ background:"#E8F5EE", border:"1.5px solid #A8C4B4", borderRadius:10, padding:"9px 14px", fontSize:12, color:"#4A7A6A", marginBottom:12 }}>🔒 Lista definitiva bloccata.</div>}
             {!plannedCount ? (
               <div style={{ background:"#fff", borderRadius:18, padding:"36px", textAlign:"center", border:"1.5px solid #EDE6D6" }}>
-                <div style={{ fontSize:40, marginBottom:12 }}>🛒</div><p style={{ color:"#6B5D4F" }}>Pianifica i pasti nel Planner.</p>
+                <div style={{ fontSize:40, marginBottom:12 }}>🛒</div>
+                <p style={{ color:"#6B5D4F" }}>Pianifica i pasti nel Planner.</p>
                 <button onClick={()=>setView("planner")} style={{ padding:"9px 20px", borderRadius:40, border:"none", background:"#2C2C2C", color:"#fff", fontSize:13, cursor:"pointer", fontFamily:"Georgia,serif" }}>Vai al Planner</button>
               </div>
             ) : (
@@ -489,12 +563,12 @@ export default function App() {
         {view === "archivio" && (
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
-              <span style={{ color:"#6B5D4F", fontSize:12 }}>{archive.length} settimane in archivio · ❤️ per insegnare i tuoi gusti all'AI</span>
+              <span style={{ color:"#6B5D4F", fontSize:12 }}>{archive.length} settimane · ❤️ per insegnare i tuoi gusti all'AI</span>
               <button onClick={() => archiveWeek("current")} style={{ padding:"6px 13px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer" }}>+ Archivia sett. corrente</button>
             </div>
 
             {!archive.length ? (
-              <div style={{ background:"#fff", borderRadius:14, padding:"28px", textAlign:"center", border:"1.5px solid #EDE6D6", color:"#9A8A72", fontSize:13 }}>Nessuna settimana archiviata. La domenica sera la settimana corrente viene archiviata automaticamente.</div>
+              <div style={{ background:"#fff", borderRadius:14, padding:"28px", textAlign:"center", border:"1.5px solid #EDE6D6", color:"#9A8A72", fontSize:13 }}>Nessuna settimana archiviata ancora.</div>
             ) : archiveDetail ? (() => {
               const aw = archive.find(a => a.weekKey === archiveDetail);
               if (!aw) return null;
@@ -520,7 +594,7 @@ export default function App() {
                       );
                     })}
                   </div>
-                  {(aw.likedIds||[]).length > 0 && <div style={{ marginTop:14, padding:"11px 14px", background:"#FFF8EC", borderRadius:10, border:"1.5px solid #EDE6D6", fontSize:12, color:"#6B5D4F" }}>❤️ <strong>{aw.likedIds.length}</strong> ricette preferite questa settimana — l'AI ne terrà conto per i piani futuri.</div>}
+                  {(aw.likedIds||[]).length > 0 && <div style={{ marginTop:14, padding:"11px 14px", background:"#FFF8EC", borderRadius:10, border:"1.5px solid #EDE6D6", fontSize:12, color:"#6B5D4F" }}>❤️ <strong>{aw.likedIds.length}</strong> ricette preferite — l'AI ne terrà conto per i piani futuri.</div>}
                 </div>
               );
             })() : (
