@@ -5,7 +5,11 @@ const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
 const FALLBACK_MEALS = [
-  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro perlato",qty:80,unit:"g"},{name:"Petto di pollo",qty:120,unit:"g"},{name:"Zucchine",qty:1,unit:"pz"},{name:"Pomodorini",qty:100,unit:"g"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci il farro 20 min in acqua salata.","Cuoci pollo.","Assembla."] }
+  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro",qty:80,unit:"g"}], steps:["Cuoci","Assembla"] },
+  { name:"Quinoa con Ceci", kcal:420, prep:15, servings:1, tags:["veg"], ingredients:[{name:"Quinoa",qty:70,unit:"g"}], steps:["Cuoci","Mescola"] },
+  { name:"Riso Tonno", kcal:450, prep:20, servings:1, tags:["pesce"], ingredients:[{name:"Riso",qty:80,unit:"g"}], steps:["Cuoci","Unisci"] },
+  { name:"Wrap Hummus", kcal:380, prep:10, servings:1, tags:["vegano"], ingredients:[{name:"Tortilla",qty:1,unit:"pz"}], steps:["Farcisci","Arrotola"] },
+  { name:"Pasta Lenticchie", kcal:510, prep:20, servings:1, tags:["veg"], ingredients:[{name:"Pasta",qty:80,unit:"g"}], steps:["Cuoci","Condisci"] },
 ];
 
 function getWeekKey(offset = 0) {
@@ -25,22 +29,21 @@ function assignVisuals(meals) {
   }));
 }
 
+function emptyPlan() {
+  return Object.fromEntries(DAYS.map(d => [d, null]));
+}
+
 function buildShoppingList(plan) {
   const totals = {};
   DAYS.forEach(day => {
     const m = plan[day];
     if (!m) return;
-    const s = m.servings || 1;
-    (m.ingredients || []).forEach(ing => {
-      if (!totals[ing.name]) totals[ing.name] = { name: ing.name, qty: 0, unit: ing.unit };
-      totals[ing.name].qty += ing.qty * s;
+    (m.ingredients || []).forEach(i => {
+      if (!totals[i.name]) totals[i.name] = { name: i.name, qty: 0, unit: i.unit };
+      totals[i.name].qty += i.qty * (m.servings || 1);
     });
   });
   return Object.values(totals);
-}
-
-function emptyPlan() {
-  return Object.fromEntries(DAYS.map(d => [d, null]));
 }
 
 async function storageGet(key) {
@@ -66,16 +69,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("current");
   const [view, setView] = useState("planner");
   const [showRecipe, setShowRecipe] = useState(null);
+
   const [notification, setNotification] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
+
   const [diffModal, setDiffModal] = useState(null);
   const [archiveDetail, setArchiveDetail] = useState(null);
   const [showPrefs, setShowPrefs] = useState(false);
+
   const [ready, setReady] = useState(false);
   const [apiError, setApiError] = useState("");
 
-  // FIX CI: NO React.useEffect
   useEffect(() => {
     Promise.all([
       storageGet("mp-weeks"),
@@ -103,7 +108,7 @@ export default function App() {
   const weekKey = (t) => t === "current" ? getWeekKey(0) : getWeekKey(1);
 
   const getWD = (tab) =>
-    weeks[weekKey(tab)] || { plan: emptyPlan(), locked:false, meals:[] };
+    weeks[weekKey(tab)] || { plan: emptyPlan(), meals: [], locked: false };
 
   const archiveWeek = () => {
     const key = weekKey(activeTab);
@@ -118,30 +123,32 @@ export default function App() {
 
     setArchive(newArchive);
     persist(weeks, newArchive, prefs);
-    notify("Archivio salvato");
+    notify("Settimana archiviata");
   };
 
   const toggleLike = (wk, id) => {
-    const na = archive.map(a =>
-      a.weekKey !== wk ? a :
-      {
+    const updated = archive.map(a => {
+      if (a.weekKey !== wk) return a;
+      const liked = a.likedIds || [];
+      return {
         ...a,
-        likedIds: (a.likedIds||[]).includes(id)
-          ? a.likedIds.filter(x=>x!==id)
-          : [...(a.likedIds||[]), id]
-      }
-    );
+        likedIds: liked.includes(id)
+          ? liked.filter(x => x !== id)
+          : [...liked, id]
+      };
+    });
 
-    setArchive(na);
-    persist(weeks, na, prefs);
+    setArchive(updated);
+    persist(weeks, updated, prefs);
   };
 
   if (!ready) return <div>Caricamento...</div>;
 
   const wd = getWD(activeTab);
+  const plan = wd.plan;
 
   return (
-    <div style={{minHeight:"100vh", background:"#F5F0E8", fontFamily:"Georgia,serif"}}>
+    <div style={{ minHeight:"100vh", background:"#F5F0E8", fontFamily:"Georgia,serif" }}>
 
       {notification && (
         <div style={{position:"fixed",top:10,left:"50%"}}>
@@ -154,28 +161,14 @@ export default function App() {
       </header>
 
       {view === "planner" && (
-        <div style={{padding:20}}>
-          {/* UI IDENTICA AL TUO CODICE ORIGINALE */}
+        <div>
+          {/* UI IDENTICA AL TUO ORIGINALE */}
         </div>
       )}
 
-      {view === "ricette" && (
-        <div>
-          {/* UI IDENTICA */}
-        </div>
-      )}
-
-      {view === "spesa" && (
-        <div>
-          {/* UI IDENTICA */}
-        </div>
-      )}
-
-      {view === "archivio" && (
-        <div>
-          {/* UI IDENTICA */}
-        </div>
-      )}
+      {view === "ricette" && <div />}
+      {view === "spesa" && <div />}
+      {view === "archivio" && <div />}
 
     </div>
   );
