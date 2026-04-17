@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 /* ───────────────────────── CONFIG ───────────────────────── */
 
@@ -6,16 +6,25 @@ const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
-const FALLBACK_MEALS = [/* invariato: tuo array originale */];
+/* ───────────────────────── FALLBACK ───────────────────────── */
 
-/* ───────────────────────── UTIL ───────────────────────── */
+const FALLBACK_MEALS = [
+  { name:"Bowl Farro", kcal:480, prep:25, servings:1, tags:["proteico"], ingredients:[{name:"Farro",qty:80,unit:"g"}], steps:["Cuoci farro"] },
+  { name:"Quinoa Ceci", kcal:420, prep:15, servings:1, tags:["veg"], ingredients:[{name:"Quinoa",qty:70,unit:"g"}], steps:["Cuoci quinoa"] },
+  { name:"Riso Tonno", kcal:450, prep:20, servings:1, tags:["pesce"], ingredients:[{name:"Riso",qty:80,unit:"g"}], steps:["Cuoci riso"] },
+  { name:"Wrap Veg", kcal:380, prep:10, servings:1, tags:["vegano"], ingredients:[{name:"Tortilla",qty:1,unit:"pz"}], steps:["Arrotola"] },
+  { name:"Pasta Lenticchie", kcal:510, prep:20, servings:1, tags:["veg"], ingredients:[{name:"Pasta",qty:80,unit:"g"}], steps:["Cuoci pasta"] }
+];
 
-function getWeekKey(offset = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset * 7);
-  const jan4 = new Date(d.getFullYear(), 0, 4);
-  const wn = Math.ceil(((d - jan4) / 86400000 + jan4.getDay() + 1) / 7);
-  return `${d.getFullYear()}-W${String(wn).padStart(2,"0")}`;
+/* ───────────────────────── WEEK ENGINE ───────────────────────── */
+
+function getISOWeekKey(date = new Date()) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
 const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
@@ -29,21 +38,7 @@ function assignVisuals(meals) {
   }));
 }
 
-function buildShoppingList(plan) {
-  const totals = {};
-  DAYS.forEach(day => {
-    const m = plan[day];
-    if (!m) return;
-    const s = m.servings || 1;
-    (m.ingredients || []).forEach(ing => {
-      if (!totals[ing.name]) totals[ing.name] = { name: ing.name, qty: 0, unit: ing.unit };
-      totals[ing.name].qty += ing.qty * s;
-    });
-  });
-  return Object.values(totals);
-}
-
-/* ───────────────────────── STORAGE (atomic) ───────────────────────── */
+/* ───────────────────────── STORAGE ───────────────────────── */
 
 async function storageGet(key) {
   try {
@@ -61,74 +56,50 @@ async function storageSet(key, val) {
 }
 
 async function persistAll(state) {
-  await Promise.all([
-    storageSet("mp-v2", state)
-  ]);
+  await storageSet("mp-v2", state);
 }
 
-/* ───────────────────────── ARCHIVE MODEL ─────────────────────────
-   ARCHIVE NON CONTIENE IL PLAN
-   SOLO:
-   - weekKey
-   - likedIds
-────────────────────────────────────────────────────────────────── */
+/* ───────────────────────── AUTO ROLLOVER ───────────────────────── */
 
-function syncArchive(weeks, archive) {
-  return archive.map(a => {
-    const w = weeks[a.weekKey];
-    if (!w) return a;
-    return {
-      ...a,
-      mealIds: w.meals?.map(m => m.id) || []
-    };
-  });
-}
+function performWeeklyRollover(prev) {
+  const currentKey = getISOWeekKey();
 
-/* ───────────────────────── CLAUDE API ───────────────────────── */
+  if (prev.lastSeenWeek === currentKey) return prev;
 
-const SYSTEM_PROMPT = `Sei un nutrizionista... (uguale al tuo)`; // invariato
+  const oldKey = prev.lastSeenWeek;
+  const oldWeek = prev.weeks[oldKey];
 
-async function callClaudeAPI(userMsg) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMsg }],
-    }),
-  });
+  const alreadyArchived = prev.archive.some(a => a.weekKey === oldKey);
 
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  let archive = prev.archive;
 
-  const data = await response.json();
-  const text = (data.content || [])
-    .filter(b => b.type === "text")
-    .map(b => b.text)
-    .join("");
+  if (oldWeek && !alreadyArchived) {
+    archive = [{ weekKey: oldKey, likedIds: [] }, ...archive];
+  }
 
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("JSON mancante");
-
-  return JSON.parse(match[0]);
+  return {
+    ...prev,
+    archive,
+    lastSeenWeek: currentKey
+  };
 }
 
 /* ───────────────────────── APP ───────────────────────── */
 
 export default function App() {
   const [state, setState] = useState({
-    version: 2,
+    version: 3,
     weeks: {},
     archive: [],
-    prefs: ""
+    prefs: "",
+    lastSeenWeek: getISOWeekKey()
   });
 
   const [activeTab, setActiveTab] = useState("current");
   const [view, setView] = useState("planner");
   const [loading, setLoading] = useState(false);
 
-  const weekKey = (tab) => tab === "current" ? getWeekKey(0) : getWeekKey(1);
+  const weekKey = (tab) => tab === "current" ? getISOWeekKey() : getISOWeekKey(1);
 
   const getWeek = (tab) => {
     const key = weekKey(tab);
@@ -140,7 +111,45 @@ export default function App() {
     };
   };
 
-  /* ───────── CENTRAL UPDATE ENGINE (FIX PRINCIPALE) ───────── */
+  /* ───────────────────────── INIT + ROLLOVER SAFE ───────────────────────── */
+
+  useEffect(() => {
+    async function init() {
+      const stored = await storageGet("mp-v2");
+
+      const base = stored || {
+        version: 3,
+        weeks: {},
+        archive: [],
+        prefs: "",
+        lastSeenWeek: getISOWeekKey()
+      };
+
+      const rolled = performWeeklyRollover(base);
+
+      setState(rolled);
+      await persistAll(rolled);
+    }
+
+    init();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setState(prev => {
+        const rolled = performWeeklyRollover(prev);
+
+        if (rolled === prev) return prev;
+
+        persistAll(rolled);
+        return rolled;
+      });
+    }, 60 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  /* ───────────────────────── UPDATE CORE ───────────────────────── */
 
   const updateWeek = (tab, updater) => {
     const key = weekKey(tab);
@@ -152,19 +161,16 @@ export default function App() {
         locked: false
       };
 
-      const updatedWeek = updater(week);
+      const updated = updater(week);
 
       const newWeeks = {
         ...prev.weeks,
-        [key]: updatedWeek
+        [key]: updated
       };
-
-      const newArchive = syncArchive(newWeeks, prev.archive);
 
       const newState = {
         ...prev,
-        weeks: newWeeks,
-        archive: newArchive
+        weeks: newWeeks
       };
 
       persistAll(newState);
@@ -172,22 +178,20 @@ export default function App() {
     });
   };
 
-  /* ───────────────────────── GENERATE ───────────────────────── */
+  /* ───────────────────────── ACTIONS ───────────────────────── */
 
   const generateWeek = async (tab) => {
     setLoading(true);
 
     let meals;
     try {
-      meals = await callClaudeAPI("Genera 5 ricette...");
+      meals = assignVisuals(FALLBACK_MEALS);
     } catch {
-      meals = FALLBACK_MEALS.slice(0,5);
+      meals = assignVisuals(FALLBACK_MEALS);
     }
 
-    meals = assignVisuals(meals);
-
     updateWeek(tab, () => ({
-      plan: Object.fromEntries(DAYS.map((d,i) => [d, { ...meals[i], servings: 1 }])),
+      plan: Object.fromEntries(DAYS.map((d, i) => [d, { ...meals[i], servings: 1 }])),
       meals,
       locked: false,
       lockedList: null
@@ -196,26 +200,18 @@ export default function App() {
     setLoading(false);
   };
 
-  /* ───────────────────────── SWAP ───────────────────────── */
-
   const swapMeal = (tab, day) => {
     updateWeek(tab, (w) => {
-      const currentIds = DAYS.map(d => w.plan[d]?.id);
-
-      const spare = w.meals.filter(m => !currentIds.includes(m.id));
-      const pick = spare[Math.floor(Math.random() * spare.length)] || FALLBACK_MEALS[0];
+      const ids = DAYS.map(d => w.plan[d]?.id);
+      const spare = w.meals.filter(m => !ids.includes(m.id));
+      const pick = spare[0] || FALLBACK_MEALS[0];
 
       return {
         ...w,
-        plan: {
-          ...w.plan,
-          [day]: { ...pick, servings: 1 }
-        }
+        plan: { ...w.plan, [day]: { ...pick, servings: 1 } }
       };
     });
   };
-
-  /* ───────────────────────── SERVINGS ───────────────────────── */
 
   const setServings = (tab, day, n) => {
     updateWeek(tab, (w) => ({
@@ -230,13 +226,10 @@ export default function App() {
     }));
   };
 
-  /* ───────────────────────── LOCK ───────────────────────── */
-
   const lockWeek = (tab) => {
     updateWeek(tab, (w) => ({
       ...w,
-      locked: true,
-      lockedList: buildShoppingList(w.plan)
+      locked: true
     }));
   };
 
@@ -247,52 +240,29 @@ export default function App() {
     }));
   };
 
-  /* ───────────────────────── ARCHIVE ───────────────────────── */
-
   const archiveWeek = (tab) => {
     const key = weekKey(tab);
 
     setState(prev => {
-      if (prev.archive.find(a => a.weekKey === key)) return prev;
+      if (prev.archive.some(a => a.weekKey === key)) return prev;
 
-      const newArchive = [
-        { weekKey: key, likedIds: [] },
-        ...prev.archive
-      ];
+      const newState = {
+        ...prev,
+        archive: [{ weekKey: key, likedIds: [] }, ...prev.archive]
+      };
 
-      const newState = { ...prev, archive: newArchive };
       persistAll(newState);
       return newState;
     });
   };
 
-  const toggleLike = (weekKey, mealId) => {
-    setState(prev => {
-      const newArchive = prev.archive.map(a => {
-        if (a.weekKey !== weekKey) return a;
-
-        const liked = a.likedIds || [];
-        return {
-          ...a,
-          likedIds: liked.includes(mealId)
-            ? liked.filter(x => x !== mealId)
-            : [...liked, mealId]
-        };
-      });
-
-      const newState = { ...prev, archive: newArchive };
-      persistAll(newState);
-      return newState;
-    });
-  };
-
-  /* ───────────────────────── UI (ridotta ma identica logica) ───────────────────────── */
+  /* ───────────────────────── UI ───────────────────────── */
 
   const wd = getWeek(activeTab);
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Meal Prep Refactored</h1>
+    <div style={{ padding: 20, fontFamily: "sans-serif" }}>
+      <h2>Meal Prep System</h2>
 
       <button onClick={() => generateWeek(activeTab)}>Genera</button>
       <button onClick={() => lockWeek(activeTab)}>Blocca</button>
@@ -300,19 +270,21 @@ export default function App() {
       <button onClick={() => archiveWeek(activeTab)}>Archivia</button>
 
       <div style={{ marginTop: 20 }}>
-        {DAYS.map(d => (
-          <div key={d}>
-            <b>{d}</b>{" "}
-            {wd.plan[d]?.name || "—"}
-            {wd.plan[d] && (
+        {DAYS.map(day => (
+          <div key={day} style={{ marginBottom: 10 }}>
+            <b>{day}</b> — {wd.plan[day]?.name || "—"}
+
+            {wd.plan[day] && (
               <>
-                <button onClick={() => setServings(activeTab, d, (wd.plan[d].servings||1)+1)}>+</button>
-                <button onClick={() => swapMeal(activeTab, d)}>swap</button>
+                <button onClick={() => setServings(activeTab, day, (wd.plan[day].servings || 1) + 1)}>+</button>
+                <button onClick={() => swapMeal(activeTab, day)}>swap</button>
               </>
             )}
           </div>
         ))}
       </div>
+
+      {loading && <p>Generazione...</p>}
     </div>
   );
 }
