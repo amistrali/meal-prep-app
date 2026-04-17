@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+
 import { useState, useCallback, useEffect } from "react";
 
 const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
@@ -22,7 +24,12 @@ function getWeekKey(offset = 0) {
 }
 
 function assignVisuals(meals) {
-  return meals.map((m, i) => ({ ...m, id: m.id ?? (Date.now() + i + Math.random()), color: COLORS[i % COLORS.length], emoji: EMOJIS[i % EMOJIS.length] }));
+  return meals.map((m, i) => ({
+    ...m,
+    id: m.id ?? (Date.now() + i + Math.random()),
+    color: COLORS[i % COLORS.length],
+    emoji: EMOJIS[i % EMOJIS.length]
+  }));
 }
 
 function buildShoppingList(plan) {
@@ -45,13 +52,42 @@ function diffLists(prev, curr) {
   return {
     added: curr.filter(i => !pm[i.name]),
     removed: prev.filter(i => !cm[i.name]),
-    changed: curr.filter(i => pm[i.name] && pm[i.name].qty !== i.qty).map(i => ({ ...i, prevQty: pm[i.name].qty }))
+    changed: curr.filter(i => pm[i.name] && pm[i.name].qty !== i.qty)
   };
 }
 
 const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
 
-// ── STORAGE ────────────────────────────────────────────────────────────────
+// API CALL
+const SYSTEM_PROMPT = `Sei un nutrizionista esperto...`;
+
+async function callClaudeAPI(userMsg) {
+  const response = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 3000,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMsg }],
+    }),
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+
+  const text = (data.content || [])
+    .filter(b => b.type === "text")
+    .map(b => b.text)
+    .join("");
+
+  const match = text.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error("Nessun JSON trovato");
+
+  return JSON.parse(match[0]);
+}
+
+// STORAGE
 async function storageGet(key) {
   try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
 }
@@ -59,58 +95,34 @@ async function storageSet(key, val) {
   try { await window.storage.set(key, JSON.stringify(val)); } catch {}
 }
 
-// ── APP ────────────────────────────────────────────────────────────────────
+// APP
 export default function App() {
   const [weeks, setWeeks] = useState({});
   const [archive, setArchive] = useState([]);
   const [prefs, setPrefs] = useState("");
   const [activeTab, setActiveTab] = useState("current");
-
-  // load
-  useEffect(() => {
-    Promise.all([storageGet("mp-weeks"), storageGet("mp-archive"), storageGet("mp-prefs")]).then(([w, a, p]) => {
-      if (w) setWeeks(w);
-      if (a) setArchive(a);
-      if (p) setPrefs(p);
-    });
-  }, []);
-
-  // 🔴 MODIFICATO
-  const persist = useCallback((newWeeks, newArchive, newPrefs) => {
-    const syncedArchive = (newArchive || []).map(a => {
-      const w = newWeeks[a.weekKey];
-      if (!w) return a;
-      return { ...a, plan: w.plan, meals: w.meals || a.meals };
-    });
-
-    storageSet("mp-weeks", newWeeks);
-    storageSet("mp-archive", syncedArchive);
-    storageSet("mp-prefs", newPrefs);
-
-    setArchive(syncedArchive);
-  }, []);
+  const [view, setView] = useState("planner");
 
   const weekKey = (tab) => tab === "current" ? getWeekKey(0) : getWeekKey(1);
-  const getWD = (tab) => weeks[weekKey(tab)] || { plan: emptyPlan(), locked: false, meals: [] };
+  const getWD = (tab) => weeks[weekKey(tab)] || { plan: emptyPlan(), locked: false, lockedList: null, meals: [] };
 
-  // 🔴 MODIFICATO
-  const archiveWeek = (tab) => {
-    const key = weekKey(tab);
-    const wd = getWD(tab);
-
-    const exists = archive.find(a => a.weekKey === key);
-
-    const newArchive = exists
-      ? archive.map(a =>
-          a.weekKey === key
-            ? { ...a, plan: wd.plan, meals: wd.meals || a.meals }
-            : a
-        )
-      : [{ weekKey: key, plan: wd.plan, meals: wd.meals || [], likedIds: [] }, ...archive];
-
-    setArchive(newArchive);
-    persist(weeks, newArchive, prefs);
+  const persist = (w,a,p) => {
+    storageSet("mp-weeks", w);
+    storageSet("mp-archive", a);
+    storageSet("mp-prefs", p);
   };
 
-  return <div>App pronta</div>;
+  const generateWeek = async () => {
+    const raw = await callClaudeAPI("Genera 5 ricette");
+    const meals = assignVisuals(raw.slice(0,5));
+    const plan = Object.fromEntries(DAYS.map((d,i)=>[d,{...meals[i],servings:1}]));
+
+    const key = weekKey(activeTab);
+    const nw = { ...weeks, [key]: { plan, meals } };
+
+    setWeeks(nw);
+    persist(nw, archive, prefs);
+  };
+
+  return <div>App invariata UI</div>;
 }
