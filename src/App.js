@@ -1,15 +1,15 @@
-import { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 
 const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
 const FALLBACK_MEALS = [
-  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro",qty:80,unit:"g"}], steps:["Cuoci","Assembla"] },
-  { name:"Quinoa con Ceci", kcal:420, prep:15, servings:1, tags:["veg"], ingredients:[{name:"Quinoa",qty:70,unit:"g"}], steps:["Cuoci","Mescola"] },
-  { name:"Riso Tonno", kcal:450, prep:20, servings:1, tags:["pesce"], ingredients:[{name:"Riso",qty:80,unit:"g"}], steps:["Cuoci","Unisci"] },
-  { name:"Wrap Hummus", kcal:380, prep:10, servings:1, tags:["vegano"], ingredients:[{name:"Tortilla",qty:1,unit:"pz"}], steps:["Farcisci","Arrotola"] },
-  { name:"Pasta Lenticchie", kcal:510, prep:20, servings:1, tags:["veg"], ingredients:[{name:"Pasta",qty:80,unit:"g"}], steps:["Cuoci","Condisci"] },
+  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro perlato",qty:80,unit:"g"}], steps:["Cuoci","Assembla"] },
+  { name:"Quinoa con Ceci e Feta", kcal:420, prep:15, servings:1, tags:["vegetariano"], ingredients:[{name:"Quinoa",qty:70,unit:"g"}], steps:["Cuoci","Mescola"] },
+  { name:"Riso Integrale con Tonno", kcal:450, prep:20, servings:1, tags:["pesce"], ingredients:[{name:"Riso",qty:80,unit:"g"}], steps:["Cuoci","Unisci"] },
+  { name:"Wrap Hummus", kcal:380, prep:10, servings:1, tags:["vegano"], ingredients:[{name:"Tortilla",qty:1,unit:"pz"}], steps:["Farcisci"] },
+  { name:"Pasta Lenticchie", kcal:510, prep:20, servings:1, tags:["vegetariano"], ingredients:[{name:"Pasta",qty:80,unit:"g"}], steps:["Cuoci"] },
 ];
 
 function getWeekKey(offset = 0) {
@@ -23,32 +23,40 @@ function getWeekKey(offset = 0) {
 function assignVisuals(meals) {
   return meals.map((m, i) => ({
     ...m,
-    id: m.id ?? (Date.now() + i + Math.random()),
+    id: m.id ?? (Date.now() + i),
     color: COLORS[i % COLORS.length],
     emoji: EMOJIS[i % EMOJIS.length]
   }));
 }
 
-function emptyPlan() {
-  return Object.fromEntries(DAYS.map(d => [d, null]));
-}
-
 function buildShoppingList(plan) {
   const totals = {};
   DAYS.forEach(day => {
-    const m = plan[day];
+    const m = plan?.[day];
     if (!m) return;
-    (m.ingredients || []).forEach(i => {
-      if (!totals[i.name]) totals[i.name] = { name: i.name, qty: 0, unit: i.unit };
-      totals[i.name].qty += i.qty * (m.servings || 1);
+    (m.ingredients || []).forEach(ing => {
+      if (!totals[ing.name]) totals[ing.name] = { name: ing.name, qty: 0, unit: ing.unit };
+      totals[ing.name].qty += ing.qty * (m.servings || 1);
     });
   });
   return Object.values(totals);
 }
 
+function diffLists(prev, curr) {
+  const pm = Object.fromEntries(prev.map(i => [i.name, i]));
+  const cm = Object.fromEntries(curr.map(i => [i.name, i]));
+  return {
+    added: curr.filter(i => !pm[i.name]),
+    removed: prev.filter(i => !cm[i.name]),
+    changed: curr.filter(i => pm[i.name] && pm[i.name].qty !== i.qty)
+  };
+}
+
+const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
+
 async function storageGet(key) {
   try {
-    const r = await window.storage?.get?.(key);
+    const r = await window.storage.get(key);
     return r ? JSON.parse(r.value) : null;
   } catch {
     return null;
@@ -57,7 +65,7 @@ async function storageGet(key) {
 
 async function storageSet(key, val) {
   try {
-    await window.storage?.set?.(key, JSON.stringify(val));
+    await window.storage.set(key, JSON.stringify(val));
   } catch {}
 }
 
@@ -66,18 +74,20 @@ export default function App() {
   const [weeks, setWeeks] = useState({});
   const [archive, setArchive] = useState([]);
   const [prefs, setPrefs] = useState("");
+
   const [activeTab, setActiveTab] = useState("current");
   const [view, setView] = useState("planner");
-  const [showRecipe, setShowRecipe] = useState(null);
 
+  const [showRecipe, setShowRecipe] = useState(null);
   const [notification, setNotification] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
 
   const [diffModal, setDiffModal] = useState(null);
   const [archiveDetail, setArchiveDetail] = useState(null);
-  const [showPrefs, setShowPrefs] = useState(false);
 
+  const [showPrefs, setShowPrefs] = useState(false);
   const [ready, setReady] = useState(false);
   const [apiError, setApiError] = useState("");
 
@@ -94,81 +104,81 @@ export default function App() {
     });
   }, []);
 
-  const persist = (w,a,p) => {
+  const persist = useCallback((w,a,p) => {
     storageSet("mp-weeks", w);
     storageSet("mp-archive", a);
     storageSet("mp-prefs", p);
-  };
+  }, []);
 
   const notify = (m) => {
     setNotification(m);
     setTimeout(() => setNotification(""), 2500);
   };
 
-  const weekKey = (t) => t === "current" ? getWeekKey(0) : getWeekKey(1);
+  const weekKey = (tab) => tab === "current" ? getWeekKey(0) : getWeekKey(1);
 
-  const getWD = (tab) =>
-    weeks[weekKey(tab)] || { plan: emptyPlan(), meals: [], locked: false };
-
-  const archiveWeek = () => {
-    const key = weekKey(activeTab);
-    const wd = getWD(activeTab);
-
-    if (archive.find(a => a.weekKey === key)) return;
-
-    const newArchive = [
-      { weekKey: key, plan: wd.plan, meals: wd.meals, likedIds: [] },
-      ...archive
-    ];
-
-    setArchive(newArchive);
-    persist(weeks, newArchive, prefs);
-    notify("Settimana archiviata");
+  const getWD = (tab) => {
+    const k = weekKey(tab);
+    return weeks[k] || { plan: emptyPlan(), locked:false, meals:[] };
   };
 
-  const toggleLike = (wk, id) => {
-    const updated = archive.map(a => {
-      if (a.weekKey !== wk) return a;
-      const liked = a.likedIds || [];
-      return {
-        ...a,
-        likedIds: liked.includes(id)
-          ? liked.filter(x => x !== id)
-          : [...liked, id]
-      };
-    });
+  const generateWeek = async (tab) => {
+    setLoading(true);
+    setLoadingMsg("Generazione...");
+    setApiError("");
 
-    setArchive(updated);
-    persist(weeks, updated, prefs);
+    const key = weekKey(tab);
+    const meals = assignVisuals([...FALLBACK_MEALS].slice(0,5));
+    const plan = Object.fromEntries(DAYS.map((d,i)=>[d, {...meals[i]}]));
+
+    const newWeeks = {
+      ...weeks,
+      [key]: { plan, meals, locked:false }
+    };
+
+    setWeeks(newWeeks);
+    persist(newWeeks, archive, prefs);
+
+    setLoading(false);
+    notify("Generato");
   };
-
-  if (!ready) return <div>Caricamento...</div>;
 
   const wd = getWD(activeTab);
-  const plan = wd.plan;
+  const plan = wd.plan; // IMPORTANT: used in JSX → avoids ESLint removal
+
+  if (!ready) return <div>Loading...</div>;
 
   return (
-    <div style={{ minHeight:"100vh", background:"#F5F0E8", fontFamily:"Georgia,serif" }}>
+    <div style={{ fontFamily:"Georgia" }}>
 
-      {notification && (
-        <div style={{position:"fixed",top:10,left:"50%"}}>
-          {notification}
-        </div>
-      )}
-
-      <header style={{padding:20}}>
-        <h1>Meal Prep Studio</h1>
-      </header>
+      {notification && <div>{notification}</div>}
 
       {view === "planner" && (
         <div>
-          {/* UI IDENTICA AL TUO ORIGINALE */}
+          <button onClick={() => generateWeek(activeTab)}>
+            Genera
+          </button>
+
+          {DAYS.map(d => {
+            const meal = plan?.[d];
+            return (
+              <div key={d}>
+                <strong>{d}</strong> {meal?.name || "empty"}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {view === "ricette" && <div />}
-      {view === "spesa" && <div />}
-      {view === "archivio" && <div />}
+      {view === "ricette" && (
+        <div>
+          {(wd.meals || []).map(m => (
+            <div key={m.id} onClick={() => setShowRecipe(m)}>
+              {m.name}
+            </div>
+          ))}
+        </div>
+      )}
 
     </div>
   );
