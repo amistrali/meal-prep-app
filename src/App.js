@@ -474,7 +474,35 @@ export default function App() {
                           </div>
                         </div>
                       ) : (
-                        <div style={{ flex:1, height:38, borderRadius:9, border:"1.5px dashed #C8BBA8", display:"flex", alignItems:"center", paddingLeft:12, color:"#B0A090", fontSize:12 }}>Nessun pasto</div>
+                        <div style={{ flex:1, display:"flex", alignItems:"center", gap:10 }}>
+                          <div style={{ flex:1, height:38, borderRadius:9, border:"1.5px dashed #C8BBA8", display:"flex", alignItems:"center", paddingLeft:12, color:"#B0A090", fontSize:12 }}>Nessun pasto assegnato</div>
+                          {!locked && (
+                            <button onClick={async () => {
+                              const currentNames = DAYS.map(d => plan[d]?.name).filter(Boolean).join(", ");
+                              setLoading(true); setLoadingMsg("Genero una ricetta per " + day + "...");
+                              try {
+                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (prefs ? " Preferenze: " + prefs : "") + " Rispondi con array JSON di 1 elemento.");
+                                const meal = assignVisuals([parsed[0]])[0];
+                                const newMeals = [...(wd.meals || []), meal];
+                                const newPlan = { ...plan, [day]: { ...meal, servings: 1 } };
+                                const key = weekKey(activeTab);
+                                const nw = { ...weeks, [key]: { ...wd, plan: newPlan, meals: newMeals } };
+                                updateWeeks(nw, archive, prefs, prefsHistory);
+                                notify("✨ Ricetta generata per " + day + "!");
+                              } catch {
+                                const fb = assignVisuals([FALLBACK_MEALS[Math.floor(Math.random() * FALLBACK_MEALS.length)]])[0];
+                                const newPlan = { ...plan, [day]: { ...fb, servings: 1 } };
+                                const key = weekKey(activeTab);
+                                const nw = { ...weeks, [key]: { ...wd, plan: newPlan } };
+                                updateWeeks(nw, archive, prefs, prefsHistory);
+                                notify("📋 Ricetta di esempio inserita per " + day);
+                              }
+                              setLoading(false); setLoadingMsg("");
+                            }} style={{ padding:"5px 12px", borderRadius:20, border:"none", background:"#D4A96A", color:"#fff", fontSize:11, cursor:"pointer", fontFamily:"Georgia,serif", whiteSpace:"nowrap", boxShadow:"0 2px 6px rgba(212,169,106,.35)" }}>
+                              ✨ Genera
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
