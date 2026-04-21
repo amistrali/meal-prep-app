@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import React from "react";
 
 const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
@@ -142,7 +141,6 @@ export default function App() {
     });
   }, []);
 
-  // FIX 1: persist accetta anche archivio opzionale per aggiornarlo in sincronia
   const persist = useCallback((newWeeks, newArchive, newPrefs, newPrefsHistory) => {
     storage.set("mp-weeks", newWeeks);
     storage.set("mp-archive", newArchive);
@@ -323,6 +321,21 @@ export default function App() {
   };
 
   // ── RENDER ────────────────────────────────────────────────────────────────
+  // Compute sl here so useEffect can use it (hooks must be before early returns)
+  const wd = getWD(activeTab);
+  const plan = wd.plan;
+  const locked = wd.locked;
+  const sl = buildShoppingList(plan);
+  const plannedCount = DAYS.filter(d => plan[d]).length;
+  const activeSl = sl.filter(i => checkedSl[i.name] !== false);
+  const hasData = DAYS.some(d => plan[d]);
+  const wLabel = (t) => `${t === "current" ? "Sett. corrente" : "Sett. successiva"} (W${weekKey(t).split("-W")[1]})`;
+
+  // Reset checkedSl to all-checked whenever shopping list content changes
+  const slKey = sl.map(i => i.name + i.qty).join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setCheckedSl(Object.fromEntries(sl.map(i => [i.name, true]))); }, [slKey]);
+
   if (!ready) return (
     <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#6B5D4F", fontSize:16 }}>
       Caricamento...
@@ -341,17 +354,8 @@ export default function App() {
   const plan = wd.plan;
   const locked = wd.locked;
   const sl = buildShoppingList(plan);
-  // Auto-init checkedSl: all checked when list changes or tab changes
-  const slKey = sl.map(i => i.name + i.qty).join("|");
-  const prevSlKey = useRef("");
-  if (prevSlKey.current !== slKey) {
-    prevSlKey.current = slKey;
-    const allChecked = Object.fromEntries(sl.map(i => [i.name, true]));
-    // Only reset if keys actually changed (avoids infinite loop)
-    setTimeout(() => setCheckedSl(allChecked), 0);
-  }
-  const activeSl = sl.filter(i => checkedSl[i.name] !== false);
   const plannedCount = DAYS.filter(d => plan[d]).length;
+  const activeSl = sl.filter(i => checkedSl[i.name] !== false);
   const hasData = DAYS.some(d => plan[d]);
   const wLabel = (t) => `${t === "current" ? "Sett. corrente" : "Sett. successiva"} (W${weekKey(t).split("-W")[1]})`;
 
