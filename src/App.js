@@ -350,15 +350,6 @@ export default function App() {
     </div>
   );
 
-  const wd = getWD(activeTab);
-  const plan = wd.plan;
-  const locked = wd.locked;
-  const sl = buildShoppingList(plan);
-  const plannedCount = DAYS.filter(d => plan[d]).length;
-  const activeSl = sl.filter(i => checkedSl[i.name] !== false);
-  const hasData = DAYS.some(d => plan[d]);
-  const wLabel = (t) => `${t === "current" ? "Sett. corrente" : "Sett. successiva"} (W${weekKey(t).split("-W")[1]})`;
-
   return (
     <div style={{ minHeight:"100vh", background:"#F5F0E8", fontFamily:"Georgia,serif" }}>
       <div style={{ position:"fixed", inset:0, backgroundImage:"radial-gradient(circle at 20% 50%,rgba(212,169,106,.08),transparent 60%),radial-gradient(circle at 80% 20%,rgba(123,175,142,.08),transparent 60%)", pointerEvents:"none" }} />
