@@ -607,37 +607,68 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ background:"#fff", borderRadius:18, border:"1.5px solid #EDE6D6", overflow:"hidden" }}>
-                  {sl.map((item,i) => {
-                    const checked = checkedSl[item.name] !== false;
+                {(() => {
+                  // Categorize items by keyword
+                  const CATS = [
+                    { label:"🥩 Carne e Pesce",    color:"#C4855A", keys:["pollo","carne","tonno","salmone","merluzzo","tacchino","manzo","maiale","gamberett","pesce","prosciutto","pancetta","speck"] },
+                    { label:"🥦 Verdure",           color:"#7BAF8E", keys:["zucchine","pomodor","insalata","spinaci","rucola","carote","carota","peperone","cetriolo","cipolla","aglio","broccoli","funghi","melanzane","sedano","finocchio","verdur","lattuga"] },
+                    { label:"🌾 Cereali e Legumi",  color:"#D4A96A", keys:["farro","riso","quinoa","pasta","lenticchie","ceci","fagioli","avena","orzo","farina","pane","tortilla","edamame","mais","couscous"] },
+                    { label:"🧀 Latticini e Uova",  color:"#8FA656", keys:["feta","parmigiano","mozzarella","yogurt","latte","burro","uova","uovo","formaggio","ricotta","panna"] },
+                    { label:"🫙 Condimenti e Altro",color:"#9A8A72", keys:[] },
+                  ];
+                  function getCategory(name) {
+                    const n = name.toLowerCase();
+                    for (const cat of CATS.slice(0,-1)) {
+                      if (cat.keys.some(k => n.includes(k))) return cat.label;
+                    }
+                    return CATS[CATS.length-1].label;
+                  }
+                  // Group items by category
+                  const grouped = {};
+                  sl.forEach(item => {
+                    const cat = getCategory(item.name);
+                    if (!grouped[cat]) grouped[cat] = [];
+                    grouped[cat].push(item);
+                  });
+                  const catOrder = CATS.map(c => c.label).filter(l => grouped[l]);
+                  return catOrder.map(catLabel => {
+                    const catColor = CATS.find(c => c.label === catLabel)?.color || "#9A8A72";
+                    const items = grouped[catLabel];
                     return (
-                      <div key={item.name}
-                        onClick={() => { if (!locked) setCheckedSl(prev => ({...prev, [item.name]: !checked})); }}
-                        style={{ display:"flex", alignItems:"center", padding:"11px 16px", borderBottom:i<sl.length-1?"1px solid #F0EBE0":"none", fontSize:13, gap:10, cursor:locked?"default":"pointer", background:checked?"#fff":"#F8F6F2", transition:"background .15s" }}>
-                        {/* Checkbox */}
-                        <div style={{ width:20, height:20, borderRadius:5, flexShrink:0, border:checked?"none":"1.5px solid #C8BBA8", background:checked?"#7BAF8E":"transparent", display:"flex", alignItems:"center", justifyContent:"center", transition:"all .15s" }}>
-                          {checked && <svg width="11" height="9" viewBox="0 0 12 10" fill="none"><path d="M1 5l3.5 3.5L11 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      <div key={catLabel} style={{ marginBottom:10 }}>
+                        <div style={{ fontSize:11, fontWeight:600, color:catColor, letterSpacing:1, textTransform:"uppercase", padding:"8px 16px 6px", background:"#fff", borderRadius:"12px 12px 0 0", borderBottom:"1.5px solid #EDE6D6", border:"1.5px solid #EDE6D6" }}>
+                          {catLabel} <span style={{color:"#B0A090",fontWeight:400}}>({items.filter(i=>checkedSl[i.name]!==false).length}/{items.length})</span>
                         </div>
-                        <span style={{ flex:1, color:checked?"#2C2C2C":"#B0A090", textDecoration:checked?"none":"line-through", transition:"all .15s" }}>{item.name}</span>
-                        <span style={{ color:"#9A8A72", fontStyle:"italic", flexShrink:0, fontSize:12 }}>{item.qty} {item.unit}</span>
-                        {checked && (
-                          <a href={"https://www.amazon.it/s?k="+encodeURIComponent(item.name)+"&i=amazonfresh"} target="_blank" rel="noreferrer"
-                            onClick={e=>e.stopPropagation()}
-                            title={"Cerca su Amazon Fresh: "+item.name}
-                            style={{ flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", width:26, height:26, borderRadius:7, background:"#FFF3E0", border:"1.5px solid #FFD180", textDecoration:"none", fontSize:13 }}>
-                            🛒
-                          </a>
-                        )}
+                        <div style={{ background:"#fff", borderRadius:"0 0 12px 12px", border:"1.5px solid #EDE6D6", borderTop:"none", overflow:"hidden" }}>
+                          {items.map((item, i) => {
+                            const checked = checkedSl[item.name] !== false;
+                            return (
+                              <div key={item.name}
+                                onClick={() => { if (!locked) setCheckedSl(prev => ({...prev, [item.name]: !checked})); }}
+                                style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:i<items.length-1?"1px solid #F0EBE0":"none", fontSize:13, gap:10, cursor:locked?"default":"pointer", background:checked?"#fff":"#F8F6F2", transition:"background .15s" }}>
+                                <div style={{ width:19, height:19, borderRadius:5, flexShrink:0, border:checked?"none":"1.5px solid #C8BBA8", background:checked?"#7BAF8E":"transparent", display:"flex", alignItems:"center", justifyContent:"center", transition:"all .15s" }}>
+                                  {checked && <svg width="10" height="8" viewBox="0 0 12 10" fill="none"><path d="M1 5l3.5 3.5L11 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                </div>
+                                <span style={{ flex:1, color:checked?"#2C2C2C":"#B0A090", textDecoration:checked?"none":"line-through", transition:"all .15s" }}>{item.name}</span>
+                                <span style={{ color:"#9A8A72", fontStyle:"italic", flexShrink:0, fontSize:12 }}>{item.qty} {item.unit}</span>
+                                {checked && (
+                                  <a href={"https://www.amazon.it/s?k="+encodeURIComponent(item.name)+"&i=amazonfresh"} target="_blank" rel="noreferrer"
+                                    onClick={e=>e.stopPropagation()}
+                                    title={"Cerca su Amazon Fresh: "+item.name}
+                                    style={{ flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", width:24, height:24, borderRadius:6, background:"#FFF3E0", border:"1.5px solid #FFD180", textDecoration:"none", fontSize:12 }}>
+                                    🛒
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
-                  })}
-                </div>
+                  });
+                })()}
 
-                {activeSl.length > 0 && (
-                  <button onClick={() => { activeSl.forEach((item,i) => { setTimeout(() => { window.open("https://www.amazon.it/s?k="+encodeURIComponent(item.name)+"&i=amazonfresh","_blank"); }, i*300); }); }} style={{ marginTop:10, width:"100%", padding:"10px", borderRadius:12, border:"1.5px solid #FFD180", background:"#FFF8EC", color:"#8A6A2A", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-                    🛒 Apri tutti su Amazon Fresh ({activeSl.length} prodotti)
-                  </button>
-                )}
+
                 <div style={{ marginTop:12, padding:"11px 14px", background:"#EDF5F0", borderRadius:10, fontSize:12, color:"#5A8A6E" }}>💡 <strong>Tip:</strong> Cuoci cereali e legumi la domenica sera — si conservano 4-5 giorni in frigo.</div>
               </div>
             )}
