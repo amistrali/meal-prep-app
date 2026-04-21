@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import React from "react";
 
 const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
@@ -123,6 +124,7 @@ export default function App() {
   const [showPrefs, setShowPrefs] = useState(false);
   const [ready, setReady] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [checkedSl, setCheckedSl] = useState({}); // shopping list item checks
 
   // Load all persisted state on mount
   useEffect(() => {
@@ -339,6 +341,16 @@ export default function App() {
   const plan = wd.plan;
   const locked = wd.locked;
   const sl = buildShoppingList(plan);
+  // Auto-init checkedSl: all checked when list changes or tab changes
+  const slKey = sl.map(i => i.name + i.qty).join("|");
+  const prevSlKey = useRef("");
+  if (prevSlKey.current !== slKey) {
+    prevSlKey.current = slKey;
+    const allChecked = Object.fromEntries(sl.map(i => [i.name, true]));
+    // Only reset if keys actually changed (avoids infinite loop)
+    setTimeout(() => setCheckedSl(allChecked), 0);
+  }
+  const activeSl = sl.filter(i => checkedSl[i.name] !== false);
   const plannedCount = DAYS.filter(d => plan[d]).length;
   const hasData = DAYS.some(d => plan[d]);
   const wLabel = (t) => `${t === "current" ? "Sett. corrente" : "Sett. successiva"} (W${weekKey(t).split("-W")[1]})`;
@@ -565,7 +577,7 @@ export default function App() {
         {/* ── SPESA ── */}
         {view === "spesa" && (
           <div>
-            {locked && <div style={{ background:"#E8F5EE", border:"1.5px solid #A8C4B4", borderRadius:10, padding:"9px 14px", fontSize:12, color:"#4A7A6A", marginBottom:12 }}>🔒 Lista definitiva bloccata.</div>}
+            {locked && <div style={{ background:"#E8F5EE", border:"1.5px solid #A8C4B4", borderRadius:10, padding:"9px 14px", fontSize:12, color:"#4A7A6A", marginBottom:12 }}>🔒 Lista bloccata — spunte e selezione fisse.</div>}
             {!plannedCount ? (
               <div style={{ background:"#fff", borderRadius:18, padding:"36px", textAlign:"center", border:"1.5px solid #EDE6D6" }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>🛒</div>
@@ -575,12 +587,62 @@ export default function App() {
             ) : (
               <div>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
-                  <span style={{ color:"#6B5D4F", fontSize:12 }}><strong>{plannedCount} pasti</strong> · {sl.length} prodotti</span>
-                  <button onClick={() => { const t = "🛒 Lista spesa — "+wLabel(activeTab)+"\n\n"+sl.map(i=>"• "+i.name+" — "+i.qty+" "+i.unit).join("\n"); navigator.clipboard.writeText(t).then(()=>notify("📋 Copiata!")); }} style={{ padding:"6px 12px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer" }}>📋 Copia lista</button>
+                  <span style={{ color:"#6B5D4F", fontSize:12 }}>
+                    <strong>{activeSl.length}/{sl.length} prodotti</strong> selezionati
+                    {!locked && <span style={{color:"#9A8A72"}}> · clicca per deselezionare</span>}
+                  </span>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {!locked && (
+                      <>
+                        <button onClick={() => setCheckedSl(Object.fromEntries(sl.map(i=>[i.name,true])))} style={{ padding:"5px 10px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer" }}>✓ Tutti</button>
+                        <button onClick={() => setCheckedSl(Object.fromEntries(sl.map(i=>[i.name,false])))} style={{ padding:"5px 10px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer" }}>✗ Nessuno</button>
+                      </>
+                    )}
+                    <button onClick={() => {
+                      const t = "🛒 Lista spesa — "+wLabel(activeTab)+"\n\n"+activeSl.map(i=>"• "+i.name+" — "+i.qty+" "+i.unit).join("\n");
+                      navigator.clipboard.writeText(t).then(()=>notify("📋 Copiata ("+activeSl.length+" prodotti)!"));
+                    }} style={{ padding:"6px 12px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer" }}>📋 Copia lista</button>
+                    <button onClick={() => {
+                      const encoded = encodeURIComponent(JSON.stringify(activeSl));
+                      const label = encodeURIComponent(wLabel(activeTab));
+                      const apiUrl = window.location.origin+"/api/shopping-list?items="+encoded+"&weekLabel="+label;
+                      window.open(apiUrl, "_blank");
+                      notify("📤 Lista pronta per Chrome ("+activeSl.length+" prodotti)!");
+                    }} style={{ padding:"6px 12px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#4A7A6A", fontSize:12, cursor:"pointer" }}>📤 Invia a Chrome</button>
+                  </div>
                 </div>
+
                 <div style={{ background:"#fff", borderRadius:18, border:"1.5px solid #EDE6D6", overflow:"hidden" }}>
-                  {sl.map((item,i)=><div key={item.name} style={{ display:"flex", padding:"11px 16px", borderBottom:i<sl.length-1?"1px solid #F0EBE0":"none", fontSize:13, color:"#2C2C2C" }}><span style={{flex:1}}>{item.name}</span><span style={{color:"#9A8A72",fontStyle:"italic"}}>{item.qty} {item.unit}</span></div>)}
+                  {sl.map((item,i) => {
+                    const checked = checkedSl[item.name] !== false;
+                    return (
+                      <div key={item.name}
+                        onClick={() => { if (!locked) setCheckedSl(prev => ({...prev, [item.name]: !checked})); }}
+                        style={{ display:"flex", alignItems:"center", padding:"11px 16px", borderBottom:i<sl.length-1?"1px solid #F0EBE0":"none", fontSize:13, gap:10, cursor:locked?"default":"pointer", background:checked?"#fff":"#F8F6F2", transition:"background .15s" }}>
+                        {/* Checkbox */}
+                        <div style={{ width:20, height:20, borderRadius:5, flexShrink:0, border:checked?"none":"1.5px solid #C8BBA8", background:checked?"#7BAF8E":"transparent", display:"flex", alignItems:"center", justifyContent:"center", transition:"all .15s" }}>
+                          {checked && <svg width="11" height="9" viewBox="0 0 12 10" fill="none"><path d="M1 5l3.5 3.5L11 1" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        </div>
+                        <span style={{ flex:1, color:checked?"#2C2C2C":"#B0A090", textDecoration:checked?"none":"line-through", transition:"all .15s" }}>{item.name}</span>
+                        <span style={{ color:"#9A8A72", fontStyle:"italic", flexShrink:0, fontSize:12 }}>{item.qty} {item.unit}</span>
+                        {checked && (
+                          <a href={"https://www.amazon.it/s?k="+encodeURIComponent(item.name)+"&i=amazonfresh"} target="_blank" rel="noreferrer"
+                            onClick={e=>e.stopPropagation()}
+                            title={"Cerca su Amazon Fresh: "+item.name}
+                            style={{ flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", width:26, height:26, borderRadius:7, background:"#FFF3E0", border:"1.5px solid #FFD180", textDecoration:"none", fontSize:13 }}>
+                            🛒
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
+
+                {activeSl.length > 0 && (
+                  <button onClick={() => { activeSl.forEach((item,i) => { setTimeout(() => { window.open("https://www.amazon.it/s?k="+encodeURIComponent(item.name)+"&i=amazonfresh","_blank"); }, i*300); }); }} style={{ marginTop:10, width:"100%", padding:"10px", borderRadius:12, border:"1.5px solid #FFD180", background:"#FFF8EC", color:"#8A6A2A", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                    🛒 Apri tutti su Amazon Fresh ({activeSl.length} prodotti)
+                  </button>
+                )}
                 <div style={{ marginTop:12, padding:"11px 14px", background:"#EDF5F0", borderRadius:10, fontSize:12, color:"#5A8A6E" }}>💡 <strong>Tip:</strong> Cuoci cereali e legumi la domenica sera — si conservano 4-5 giorni in frigo.</div>
               </div>
             )}
