@@ -5,11 +5,11 @@ const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","
 const DAYS = ["Lunedì","Martedì","Mercoledì","Giovedì","Venerdì"];
 
 const FALLBACK_MEALS = [
-  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], ingredients:[{name:"Farro perlato",qty:80,unit:"g"},{name:"Petto di pollo",qty:120,unit:"g"},{name:"Zucchine",qty:1,unit:"pz"},{name:"Pomodorini",qty:100,unit:"g"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci il farro 20 min in acqua salata, scola e raffredda.","Taglia il pollo a cubetti, saltalo con olio e timo 8 min.","Grigliale le zucchine 3-4 min per lato.","Assembla il bowl e condisci con olio e limone.","Conserva in contenitore ermetico fino a 3 giorni."] },
-  { name:"Quinoa con Ceci e Feta", kcal:420, prep:15, servings:1, tags:["vegetariano","legumi"], ingredients:[{name:"Quinoa",qty:70,unit:"g"},{name:"Ceci cotti",qty:150,unit:"g"},{name:"Feta",qty:50,unit:"g"},{name:"Cetriolo",qty:0.5,unit:"pz"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci la quinoa in acqua 2:1 per 15 min, raffredda.","Taglia cetriolo e peperone a cubetti.","Mescola tutto con feta sbriciolata.","Condisci con olio e aceto di mele.","Conserva 3-4 giorni in frigo."] },
-  { name:"Riso Integrale con Tonno", kcal:450, prep:20, servings:1, tags:["pesce","omega-3"], ingredients:[{name:"Riso integrale",qty:80,unit:"g"},{name:"Tonno al naturale",qty:130,unit:"g"},{name:"Edamame",qty:80,unit:"g"},{name:"Mais",qty:50,unit:"g"},{name:"Salsa di soia",qty:1,unit:"cucchiaino"}], steps:["Cuoci il riso integrale 30-35 min.","Cuoci gli edamame 3 min.","Spezzetta il tonno con una forchetta.","Assembla con soia e zenzero.","Cospargi di semi di sesamo."] },
-  { name:"Wrap con Hummus e Verdure", kcal:380, prep:10, servings:1, tags:["vegano","veloce"], ingredients:[{name:"Tortilla integrale",qty:1,unit:"pz"},{name:"Hummus",qty:80,unit:"g"},{name:"Carote",qty:1,unit:"pz"},{name:"Spinaci",qty:40,unit:"g"},{name:"Avocado",qty:0.5,unit:"pz"}], steps:["Stendi l'hummus sulla tortilla.","Aggiungi spinaci, carote grattugiate e avocado.","Spremi il limone sopra.","Arrotola stretto e taglia a metà.","Avvolgi nella pellicola, si conserva 1 giorno."] },
-  { name:"Pasta Lenticchie e Pesto Rucola", kcal:510, prep:20, servings:1, tags:["vegetariano","proteico"], ingredients:[{name:"Pasta di lenticchie",qty:80,unit:"g"},{name:"Rucola",qty:40,unit:"g"},{name:"Parmigiano",qty:20,unit:"g"},{name:"Noci",qty:20,unit:"g"},{name:"Olio EVO",qty:2,unit:"cucchiai"}], steps:["Cuoci la pasta 1 min meno del dovuto.","Frulla rucola, noci, parmigiano e olio.","Condisci la pasta con il pesto.","Aggiungi i ciliegini tagliati.","Conserva 2 giorni in frigo."] },
+  { name:"Bowl di Farro con Pollo", kcal:480, prep:25, servings:1, tags:["proteico","cereali"], imageQuery:"farro bowl chicken grilled vegetables healthy", recipeUrl:"https://www.giallozafferano.it/ricette/farro.html", videoQuery:"bowl di farro con pollo ricetta", ingredients:[{name:"Farro perlato",qty:80,unit:"g"},{name:"Petto di pollo",qty:120,unit:"g"},{name:"Zucchine",qty:1,unit:"pz"},{name:"Pomodorini",qty:100,unit:"g"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci il farro 20 min in acqua salata, scola e raffredda.","Taglia il pollo a cubetti, saltalo con olio e timo 8 min.","Grigliale le zucchine 3-4 min per lato.","Assembla il bowl e condisci con olio e limone.","Conserva in contenitore ermetico fino a 3 giorni."] },
+  { name:"Quinoa con Ceci e Feta", kcal:420, prep:15, servings:1, tags:["vegetariano","legumi"], imageQuery:"quinoa chickpea feta salad bowl healthy", recipeUrl:"https://www.giallozafferano.it/ricette/quinoa.html", videoQuery:"insalata quinoa ceci feta ricetta", ingredients:[{name:"Quinoa",qty:70,unit:"g"},{name:"Ceci cotti",qty:150,unit:"g"},{name:"Feta",qty:50,unit:"g"},{name:"Cetriolo",qty:0.5,unit:"pz"},{name:"Olio EVO",qty:1,unit:"cucchiaio"}], steps:["Cuoci la quinoa in acqua 2:1 per 15 min, raffredda.","Taglia cetriolo e peperone a cubetti.","Mescola tutto con feta sbriciolata.","Condisci con olio e aceto di mele.","Conserva 3-4 giorni in frigo."] },
+  { name:"Riso Integrale con Tonno", kcal:450, prep:20, servings:1, tags:["pesce","omega-3"], imageQuery:"brown rice tuna bowl edamame healthy meal prep", recipeUrl:"https://www.giallozafferano.it/ricette/riso-integrale.html", videoQuery:"riso integrale tonno ricetta pranzo", ingredients:[{name:"Riso integrale",qty:80,unit:"g"},{name:"Tonno al naturale",qty:130,unit:"g"},{name:"Edamame",qty:80,unit:"g"},{name:"Mais",qty:50,unit:"g"},{name:"Salsa di soia",qty:1,unit:"cucchiaino"}], steps:["Cuoci il riso integrale 30-35 min.","Cuoci gli edamame 3 min.","Spezzetta il tonno con una forchetta.","Assembla con soia e zenzero.","Cospargi di semi di sesamo."] },
+  { name:"Wrap con Hummus e Verdure", kcal:380, prep:10, servings:1, tags:["vegano","veloce"], imageQuery:"wrap hummus vegetables avocado spinach healthy", recipeUrl:"https://www.giallozafferano.it/ricette/wrap.html", videoQuery:"wrap hummus verdure vegano ricetta", ingredients:[{name:"Tortilla integrale",qty:1,unit:"pz"},{name:"Hummus",qty:80,unit:"g"},{name:"Carote",qty:1,unit:"pz"},{name:"Spinaci",qty:40,unit:"g"},{name:"Avocado",qty:0.5,unit:"pz"}], steps:["Stendi l'hummus sulla tortilla.","Aggiungi spinaci, carote grattugiate e avocado.","Spremi il limone sopra.","Arrotola stretto e taglia a metà.","Avvolgi nella pellicola, si conserva 1 giorno."] },
+  { name:"Pasta Lenticchie e Pesto Rucola", kcal:510, prep:20, servings:1, tags:["vegetariano","proteico"], imageQuery:"lentil pasta arugula pesto healthy italian", recipeUrl:"https://www.giallozafferano.it/ricette/pasta-lenticchie.html", videoQuery:"pasta lenticchie pesto rucola ricetta", ingredients:[{name:"Pasta di lenticchie",qty:80,unit:"g"},{name:"Rucola",qty:40,unit:"g"},{name:"Parmigiano",qty:20,unit:"g"},{name:"Noci",qty:20,unit:"g"},{name:"Olio EVO",qty:2,unit:"cucchiai"}], steps:["Cuoci la pasta 1 min meno del dovuto.","Frulla rucola, noci, parmigiano e olio.","Condisci la pasta con il pesto.","Aggiungi i ciliegini tagliati.","Conserva 2 giorni in frigo."] },
 ];
 
 // ── UTILS ──────────────────────────────────────────────────────────────────
@@ -81,7 +81,12 @@ Genera esattamente 5 ricette DIVERSE tra loro per una settimana lavorativa.
 Ogni ricetta: preparabile in anticipo, conservabile 3-4 giorni in frigo, max 30 min di prep, equilibrata e sana, trasportabile in contenitore.
 Le 5 devono coprire categorie diverse: cereali integrali, legumi, pesce, carne magra, vegano.
 IMPORTANTE: Rispondi ESCLUSIVAMENTE con un array JSON valido, nessun testo prima o dopo, nessun markdown.
-Ogni elemento: {"name":"string","kcal":number,"prep":number,"tags":["string"],"ingredients":[{"name":"string","qty":number,"unit":"string"}],"steps":["string"]}
+Ogni elemento:
+{"name":"string","kcal":number,"prep":number,"tags":["string"],
+"imageQuery":"breve query in inglese per trovare una foto del piatto (es: 'farro bowl chicken vegetables')",
+"recipeUrl":"URL di una ricetta italiana autentica su siti come giallozafferano.it, ricette.it, fattoincasadabenedetta.it, cucchiaio.it — lascia stringa vuota se non sei sicuro",
+"videoQuery":"query YouTube in italiano per trovare un video di preparazione (es: 'bowl di farro con pollo ricetta')",
+"ingredients":[{"name":"string","qty":number,"unit":"string"}],"steps":["string"]}
 qty è sempre riferito a 1 porzione.`;
 
 async function callClaudeAPI(userMsg) {
@@ -107,6 +112,35 @@ async function callClaudeAPI(userMsg) {
 }
 
 // ── APP ────────────────────────────────────────────────────────────────────
+// ── MEAL IMAGE: carica foto da Unsplash (gratuito, no API key) ─────────────
+function MealImage({ query, name, style }) {
+  const [src, setSrc] = useState(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    if (!query) return;
+    // Unsplash Source API — immagini gratuite senza API key
+    const url = `https://source.unsplash.com/400x300/?${encodeURIComponent(query)},food`;
+    setSrc(url);
+  }, [query]);
+
+  if (err || !src) {
+    return (
+      <div style={{ ...style, background:"linear-gradient(135deg,#F5F0E8,#EDE6D6)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32 }}>
+        🍽️
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={name}
+      onError={() => setErr(true)}
+      style={{ ...style, objectFit:"cover" }}
+    />
+  );
+}
+
 export default function App() {
   const [weeks, setWeeks] = useState({});
   const [archive, setArchive] = useState([]);
@@ -526,11 +560,36 @@ export default function App() {
               <div>
                 <button onClick={() => setShowRecipe(null)} style={{ marginBottom:14, padding:"6px 14px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer" }}>← Tutte le ricette</button>
                 <div style={{ background:"#fff", borderRadius:18, overflow:"hidden", border:"1.5px solid #EDE6D6", boxShadow:"0 4px 20px rgba(0,0,0,.06)" }}>
-                  <div style={{ padding:"24px 24px 16px", background:"linear-gradient(135deg,"+showRecipe.color+"18,transparent)", borderBottom:"1.5px solid #EDE6D6" }}>
-                    <div style={{ fontSize:32, marginBottom:8 }}>{showRecipe.emoji}</div>
-                    <h2 style={{ margin:"0 0 6px", fontSize:19, fontWeight:400, color:"#2C2C2C" }}>{showRecipe.name}</h2>
-                    <div style={{ display:"flex", gap:14 }}><span style={{ fontSize:12, color:"#6B5D4F" }}>⏱ {showRecipe.prep} min</span><span style={{ fontSize:12, color:"#6B5D4F" }}>🔥 {showRecipe.kcal} kcal/porzione</span></div>
+                  {/* Foto del piatto */}
+                  <div style={{ position:"relative", height:200, overflow:"hidden" }}>
+                    <MealImage query={showRecipe.imageQuery} name={showRecipe.name} style={{ width:"100%", height:"100%" }} />
+                    <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%)" }} />
+                    <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"16px 20px" }}>
+                      <div style={{ fontSize:28, marginBottom:4 }}>{showRecipe.emoji}</div>
+                      <h2 style={{ margin:"0 0 4px", fontSize:19, fontWeight:600, color:"#fff", textShadow:"0 1px 4px rgba(0,0,0,.4)" }}>{showRecipe.name}</h2>
+                      <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+                        <span style={{ fontSize:12, color:"rgba(255,255,255,.85)" }}>⏱ {showRecipe.prep} min</span>
+                        <span style={{ fontSize:12, color:"rgba(255,255,255,.85)" }}>🔥 {showRecipe.kcal} kcal/porzione</span>
+                      </div>
+                    </div>
                   </div>
+                  {/* Link ricetta e video */}
+                  {(showRecipe.recipeUrl || showRecipe.videoQuery) && (
+                    <div style={{ display:"flex", gap:8, padding:"12px 20px", borderBottom:"1.5px solid #EDE6D6", flexWrap:"wrap" }}>
+                      {showRecipe.recipeUrl && (
+                        <a href={showRecipe.recipeUrl} target="_blank" rel="noreferrer"
+                          style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:20, background:"#FFF8EC", border:"1.5px solid #EDD4A0", color:"#8A6A2A", fontSize:12, textDecoration:"none", fontFamily:"Georgia,serif" }}>
+                          📖 Ricetta originale
+                        </a>
+                      )}
+                      {showRecipe.videoQuery && (
+                        <a href={"https://www.youtube.com/results?search_query="+encodeURIComponent(showRecipe.videoQuery)} target="_blank" rel="noreferrer"
+                          style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:20, background:"#FFF0F0", border:"1.5px solid #F0C4C4", color:"#C47A7A", fontSize:12, textDecoration:"none", fontFamily:"Georgia,serif" }}>
+                          ▶️ Video preparazione
+                        </a>
+                      )}
+                    </div>
+                  )}
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr" }}>
                     <div style={{ padding:"18px 20px", borderRight:"1.5px solid #EDE6D6" }}>
                       <h3 style={{ fontSize:10, letterSpacing:3, color:"#9A8A72", textTransform:"uppercase", marginBottom:10, marginTop:0 }}>Ingredienti (1 porzione)</h3>
@@ -552,13 +611,27 @@ export default function App() {
                       <div key={meal.id} onClick={()=>setShowRecipe(meal)} style={{ background:"#fff", borderRadius:14, overflow:"hidden", cursor:"pointer", border:"1.5px solid #EDE6D6", transition:"all .18s", boxShadow:"0 2px 8px rgba(0,0,0,.04)" }}
                         onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(0,0,0,.1)"}}
                         onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,.04)"}}>
-                        <div style={{ padding:"16px 14px 10px", background:"linear-gradient(135deg,"+meal.color+"15,transparent)" }}>
-                          <div style={{ fontSize:24, marginBottom:5 }}>{meal.emoji}</div>
-                          <h3 style={{ margin:"0 0 4px", fontSize:12, fontWeight:600, color:"#2C2C2C" }}>{meal.name}</h3>
-                          <div style={{ display:"flex", gap:8 }}><span style={{ fontSize:10, color:"#9A8A72" }}>⏱{meal.prep}min</span><span style={{ fontSize:10, color:"#9A8A72" }}>🔥{meal.kcal}kcal</span></div>
+                        {/* Foto thumbnail */}
+                        <div style={{ position:"relative", height:120, overflow:"hidden" }}>
+                          <MealImage query={meal.imageQuery} name={meal.name} style={{ width:"100%", height:"100%" }} />
+                          <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 50%)" }} />
+                          <div style={{ position:"absolute", bottom:6, left:10, fontSize:18 }}>{meal.emoji}</div>
+                          {(meal.recipeUrl || meal.videoQuery) && (
+                            <div style={{ position:"absolute", top:6, right:6, display:"flex", gap:4 }}>
+                              {meal.recipeUrl && <span style={{ fontSize:11, background:"rgba(255,255,255,.85)", borderRadius:10, padding:"2px 6px" }}>📖</span>}
+                              {meal.videoQuery && <span style={{ fontSize:11, background:"rgba(255,255,255,.85)", borderRadius:10, padding:"2px 6px" }}>▶️</span>}
+                            </div>
+                          )}
                         </div>
-                        <div style={{ padding:"7px 14px 10px", display:"flex", gap:4, flexWrap:"wrap" }}>
-                          {(meal.tags||[]).map(t=><span key={t} style={{ fontSize:9, padding:"1px 7px", borderRadius:20, background:meal.color+"18", color:meal.color }}>{t}</span>)}
+                        <div style={{ padding:"10px 12px 8px" }}>
+                          <h3 style={{ margin:"0 0 4px", fontSize:12, fontWeight:600, color:"#2C2C2C" }}>{meal.name}</h3>
+                          <div style={{ display:"flex", gap:8, marginBottom:6 }}>
+                            <span style={{ fontSize:10, color:"#9A8A72" }}>⏱{meal.prep}min</span>
+                            <span style={{ fontSize:10, color:"#9A8A72" }}>🔥{meal.kcal}kcal</span>
+                          </div>
+                          <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                            {(meal.tags||[]).map(t=><span key={t} style={{ fontSize:9, padding:"1px 7px", borderRadius:20, background:meal.color+"18", color:meal.color }}>{t}</span>)}
+                          </div>
                         </div>
                       </div>
                     ))}
