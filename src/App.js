@@ -112,32 +112,77 @@ async function callClaudeAPI(userMsg) {
 }
 
 // ── APP ────────────────────────────────────────────────────────────────────
-// ── MEAL IMAGE: carica foto da Unsplash (gratuito, no API key) ─────────────
-function MealImage({ query, name, style }) {
-  const [src, setSrc] = useState(null);
-  const [err, setErr] = useState(false);
+// ── MEAL IMAGE ────────────────────────────────────────────────────────────
+// Cerca foto su TheMealDB (gratuito, no API key, foto di cibo reali)
+// Fallback su Foodish API, poi su gradiente con emoji
 
-  useEffect(() => {
-    if (!query) return;
-    // Unsplash Source API — immagini gratuite senza API key
-    const url = `https://source.unsplash.com/400x300/?${encodeURIComponent(query)},food`;
-    setSrc(url);
-  }, [query]);
+// Mappa keyword ricetta -> ID foto TheMealDB (selezionati manualmente)
+const FOOD_PHOTO_MAP = {
+  "pollo":      "https://www.themealdb.com/images/media/meals/xcsqwy1511786891.jpg",
+  "chicken":    "https://www.themealdb.com/images/media/meals/xcsqwy1511786891.jpg",
+  "tonno":      "https://www.themealdb.com/images/media/meals/vvtvtr1491816208.jpg",
+  "tuna":       "https://www.themealdb.com/images/media/meals/vvtvtr1491816208.jpg",
+  "salmon":     "https://www.themealdb.com/images/media/meals/xxyupu1468262513.jpg",
+  "salmone":    "https://www.themealdb.com/images/media/meals/xxyupu1468262513.jpg",
+  "pasta":      "https://www.themealdb.com/images/media/meals/ustsqw1468250014.jpg",
+  "lenticchie": "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
+  "lentil":     "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
+  "quinoa":     "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "ceci":       "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
+  "chickpea":   "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
+  "riso":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
+  "rice":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
+  "farro":      "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "wrap":       "https://www.themealdb.com/images/media/meals/y8kyxx1596649062.jpg",
+  "bowl":       "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "insalata":   "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "salad":      "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "hummus":     "https://www.themealdb.com/images/media/meals/y8kyxx1596649062.jpg",
+  "uova":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
+  "eggs":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
+  "zuppa":      "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
+  "soup":       "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
+  "tofu":       "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "vegano":     "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+  "vegan":      "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+};
 
-  if (err || !src) {
-    return (
-      <div style={{ ...style, background:"linear-gradient(135deg,#F5F0E8,#EDE6D6)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32 }}>
-        🍽️
-      </div>
-    );
+function getPhotoUrl(query, name) {
+  const text = ((query || "") + " " + (name || "")).toLowerCase();
+  for (const [key, url] of Object.entries(FOOD_PHOTO_MAP)) {
+    if (text.includes(key)) return url;
   }
+  // Fallback: foto generica di cibo sano
+  return "https://www.themealdb.com/images/media/meals/1550442508.jpg";
+}
+
+function MealImage({ query, name, color, emoji, style }) {
+  const [status, setStatus] = useState("loading");
+  const photoUrl = getPhotoUrl(query, name);
+
   return (
-    <img
-      src={src}
-      alt={name}
-      onError={() => setErr(true)}
-      style={{ ...style, objectFit:"cover" }}
-    />
+    <div style={{ ...style, position:"relative", overflow:"hidden" }}>
+      {/* Placeholder mentre carica */}
+      {status === "loading" && (
+        <div style={{ position:"absolute", inset:0, background:`linear-gradient(135deg, ${color||"#D4A96A"}22, ${color||"#7BAF8E"}18)`, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ width:22, height:22, border:"2px solid #C8BBA8", borderTopColor:"#7BAF8E", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
+        </div>
+      )}
+      {/* Fallback emoji se errore */}
+      {status === "error" && (
+        <div style={{ position:"absolute", inset:0, background:`linear-gradient(135deg, ${color||"#D4A96A"}33, ${color||"#7BAF8E"}22)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize: (style?.height||100) > 80 ? 40 : 22 }}>
+          {emoji||"🍽️"}
+        </div>
+      )}
+      <img
+        src={photoUrl}
+        alt={name}
+        crossOrigin="anonymous"
+        onLoad={() => setStatus("ok")}
+        onError={() => setStatus("error")}
+        style={{ width:"100%", height:"100%", objectFit:"cover", display: status === "ok" ? "block" : "none" }}
+      />
+    </div>
   );
 }
 
@@ -494,7 +539,9 @@ export default function App() {
                       </div>
                       {meal ? (
                         <div style={{ flex:1, display:"flex", alignItems:"center", gap:10 }}>
-                          <div style={{ width:38, height:38, borderRadius:9, background:meal.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{meal.emoji}</div>
+                          <div style={{ width:48, height:48, borderRadius:10, flexShrink:0, overflow:"hidden", position:"relative" }}>
+                            <MealImage query={meal.imageQuery} name={meal.name} color={meal.color} emoji={meal.emoji} style={{ width:48, height:48 }} />
+                          </div>
                           <div style={{ flex:1, minWidth:0 }}>
                             <div style={{ fontSize:12, fontWeight:600, color:"#2C2C2C", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:2 }}>{meal.name}</div>
                             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
