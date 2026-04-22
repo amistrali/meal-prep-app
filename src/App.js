@@ -113,78 +113,129 @@ async function callClaudeAPI(userMsg) {
 
 // ── APP ────────────────────────────────────────────────────────────────────
 // ── MEAL IMAGE ────────────────────────────────────────────────────────────
-// Cerca foto su TheMealDB (gratuito, no API key, foto di cibo reali)
-// Fallback su Foodish API, poi su gradiente con emoji
+// Usa Pexels API per foto pertinenti (gratuita, 200 req/ora)
+// Imposta la tua chiave Pexels nella variabile PEXELS_API_KEY qui sotto
 
-// Mappa keyword ricetta -> ID foto TheMealDB (selezionati manualmente)
-const FOOD_PHOTO_MAP = {
-  "pollo":      "https://www.themealdb.com/images/media/meals/xcsqwy1511786891.jpg",
-  "chicken":    "https://www.themealdb.com/images/media/meals/xcsqwy1511786891.jpg",
-  "tonno":      "https://www.themealdb.com/images/media/meals/vvtvtr1491816208.jpg",
-  "tuna":       "https://www.themealdb.com/images/media/meals/vvtvtr1491816208.jpg",
-  "salmon":     "https://www.themealdb.com/images/media/meals/xxyupu1468262513.jpg",
-  "salmone":    "https://www.themealdb.com/images/media/meals/xxyupu1468262513.jpg",
-  "pasta":      "https://www.themealdb.com/images/media/meals/ustsqw1468250014.jpg",
-  "lenticchie": "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
-  "lentil":     "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
-  "quinoa":     "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "ceci":       "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
-  "chickpea":   "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
-  "riso":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
-  "rice":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
-  "farro":      "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "wrap":       "https://www.themealdb.com/images/media/meals/y8kyxx1596649062.jpg",
-  "bowl":       "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "insalata":   "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "salad":      "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "hummus":     "https://www.themealdb.com/images/media/meals/y8kyxx1596649062.jpg",
-  "uova":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
-  "eggs":       "https://www.themealdb.com/images/media/meals/wrssvt1511556563.jpg",
-  "zuppa":      "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
-  "soup":       "https://www.themealdb.com/images/media/meals/vwwspt1487595025.jpg",
-  "tofu":       "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "vegano":     "https://www.themealdb.com/images/media/meals/1550442508.jpg",
-  "vegan":      "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+const PEXELS_API_KEY = process.env.REACT_APP_PEXELS_KEY || "";
+
+// Cache in memoria per evitare richieste duplicate nella stessa sessione
+const imageCache = {};
+
+async function fetchPexelsImage(query) {
+  if (!PEXELS_API_KEY) return null;
+  const cacheKey = query.toLowerCase();
+  if (imageCache[cacheKey]) return imageCache[cacheKey];
+  try {
+    const res = await fetch(
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query + " food dish")}&per_page=5&orientation=landscape`,
+      { headers: { Authorization: PEXELS_API_KEY } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.photos || data.photos.length === 0) return null;
+    // Scegli una foto a caso tra le prime 5 per varietà
+    const photo = data.photos[Math.floor(Math.random() * Math.min(3, data.photos.length))];
+    const url = photo.src.medium; // 350x233px circa
+    imageCache[cacheKey] = url;
+    return url;
+  } catch { return null; }
+}
+
+// Fallback: mappa parole-chiave culinarie -> foto specifiche su Pexels CDN
+// (usate quando API key non è impostata)
+const FALLBACK_FOOD_PHOTOS = {
+  "pollo":      "https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "chicken":    "https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "tonno":      "https://images.pexels.com/photos/3655916/pexels-photo-3655916.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "tuna":       "https://images.pexels.com/photos/3655916/pexels-photo-3655916.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "salmone":    "https://images.pexels.com/photos/3296279/pexels-photo-3296279.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "salmon":     "https://images.pexels.com/photos/3296279/pexels-photo-3296279.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "pasta":      "https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "lenticchie": "https://images.pexels.com/photos/5938/food-salad-healthy-lunch.jpg?auto=compress&cs=tinysrgb&w=400",
+  "lentil":     "https://images.pexels.com/photos/5938/food-salad-healthy-lunch.jpg?auto=compress&cs=tinysrgb&w=400",
+  "quinoa":     "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "ceci":       "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "chickpea":   "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "riso":       "https://images.pexels.com/photos/723198/pexels-photo-723198.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "rice":       "https://images.pexels.com/photos/723198/pexels-photo-723198.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "farro":      "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "wrap":       "https://images.pexels.com/photos/461198/pexels-photo-461198.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "bowl":       "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "insalata":   "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "salad":      "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "hummus":     "https://images.pexels.com/photos/461198/pexels-photo-461198.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "uova":       "https://images.pexels.com/photos/824635/pexels-photo-824635.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "zuppa":      "https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "soup":       "https://images.pexels.com/photos/539451/pexels-photo-539451.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "tofu":       "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "verdure":    "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "manzo":      "https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=400",
+  "beef":       "https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=400",
 };
 
-function getPhotoUrl(query, name) {
+function getFallbackPhoto(query, name) {
   const text = ((query || "") + " " + (name || "")).toLowerCase();
-  for (const [key, url] of Object.entries(FOOD_PHOTO_MAP)) {
+  for (const [key, url] of Object.entries(FALLBACK_FOOD_PHOTOS)) {
     if (text.includes(key)) return url;
   }
-  // Fallback: foto generica di cibo sano
-  return "https://www.themealdb.com/images/media/meals/1550442508.jpg";
+  return "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400";
 }
 
 function MealImage({ query, name, color, emoji, style }) {
+  const [imgUrl, setImgUrl] = useState(null);
   const [status, setStatus] = useState("loading");
-  const photoUrl = getPhotoUrl(query, name);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("loading");
+    setImgUrl(null);
+
+    async function load() {
+      // Prova prima Pexels API se la chiave è disponibile
+      if (PEXELS_API_KEY && query) {
+        const url = await fetchPexelsImage(query);
+        if (!cancelled && url) {
+          setImgUrl(url);
+          setStatus("ok");
+          return;
+        }
+      }
+      // Fallback sulla mappa locale
+      if (!cancelled) {
+        const fallback = getFallbackPhoto(query, name);
+        setImgUrl(fallback);
+        setStatus("fallback");
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [query, name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div style={{ ...style, position:"relative", overflow:"hidden" }}>
-      {/* Placeholder mentre carica */}
+    <div style={{ ...style, position:"relative", overflow:"hidden", background: `linear-gradient(135deg, ${color||"#D4A96A"}22, ${color||"#7BAF8E"}18)` }}>
       {status === "loading" && (
-        <div style={{ position:"absolute", inset:0, background:`linear-gradient(135deg, ${color||"#D4A96A"}22, ${color||"#7BAF8E"}18)`, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ width:22, height:22, border:"2px solid #C8BBA8", borderTopColor:"#7BAF8E", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
+        <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ width:20, height:20, border:"2px solid #C8BBA8", borderTopColor:"#7BAF8E", borderRadius:"50%", animation:"spin 1s linear infinite" }} />
         </div>
       )}
-      {/* Fallback emoji se errore */}
+      {imgUrl && (
+        <img
+          src={imgUrl}
+          alt={name}
+          onLoad={() => setStatus("ok")}
+          onError={() => { setStatus("error"); setImgUrl(null); }}
+          style={{ width:"100%", height:"100%", objectFit:"cover", display: status === "error" ? "none" : "block" }}
+        />
+      )}
       {status === "error" && (
-        <div style={{ position:"absolute", inset:0, background:`linear-gradient(135deg, ${color||"#D4A96A"}33, ${color||"#7BAF8E"}22)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize: (style?.height||100) > 80 ? 40 : 22 }}>
-          {emoji||"🍽️"}
+        <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:(style?.height||80) > 80 ? 40 : 22 }}>
+          {emoji || "🍽️"}
         </div>
       )}
-      <img
-        src={photoUrl}
-        alt={name}
-        crossOrigin="anonymous"
-        onLoad={() => setStatus("ok")}
-        onError={() => setStatus("error")}
-        style={{ width:"100%", height:"100%", objectFit:"cover", display: status === "ok" ? "block" : "none" }}
-      />
     </div>
   );
 }
+
 
 export default function App() {
   const [weeks, setWeeks] = useState({});
