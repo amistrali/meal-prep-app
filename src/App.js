@@ -189,8 +189,9 @@ function MealImage({ query, name, color, emoji, style }) {
 export default function App() {
   const [weeks, setWeeks] = useState({});
   const [archive, setArchive] = useState([]);
-  const [prefs, setPrefs] = useState("");
-  const [prefsHistory, setPrefsHistory] = useState([]); // FIX 3: storico preferenze
+  const [prefsInput, setPrefsInput] = useState(""); // campo di testo temporaneo
+  const [prefsHistory, setPrefsHistory] = useState([]); // tutte le preferenze mai inserite
+  const [activePrefs, setActivePrefs] = useState([]); // quelle attualmente selezionate (attive)
   const [activeTab, setActiveTab] = useState("current");
   const [view, setView] = useState("planner");
   const [showRecipe, setShowRecipe] = useState(null);
@@ -209,22 +210,22 @@ export default function App() {
     Promise.all([
       storage.get("mp-weeks"),
       storage.get("mp-archive"),
-      storage.get("mp-prefs"),
       storage.get("mp-prefs-history"),
-    ]).then(([w, a, p, ph]) => {
+      storage.get("mp-active-prefs"),
+    ]).then(([w, a, ph, ap]) => {
       if (w) setWeeks(w);
       if (a) setArchive(a);
-      if (p) setPrefs(p);
       if (ph) setPrefsHistory(ph);
+      if (ap) setActivePrefs(ap);
       setReady(true);
     });
   }, []);
 
-  const persist = useCallback((newWeeks, newArchive, newPrefs, newPrefsHistory) => {
+  const persist = useCallback((newWeeks, newArchive, newPrefsHistory, newActivePrefs) => {
     storage.set("mp-weeks", newWeeks);
     storage.set("mp-archive", newArchive);
-    storage.set("mp-prefs", newPrefs);
     if (newPrefsHistory !== undefined) storage.set("mp-prefs-history", newPrefsHistory);
+    if (newActivePrefs !== undefined) storage.set("mp-active-prefs", newActivePrefs);
   }, []);
 
   const notify = (msg) => { setNotification(msg); setTimeout(() => setNotification(""), 3000); };
@@ -234,7 +235,7 @@ export default function App() {
 
   // FIX 1 + 2: ogni volta che il piano della settimana corrente cambia,
   // aggiorna anche l'archivio se quella settimana è già archiviata
-  const updateWeeks = useCallback((newWeeks, currentArchive, currentPrefs, currentPrefsHistory) => {
+  const updateWeeks = useCallback((newWeeks, currentArchive, currentPrefsHistory, currentActivePrefs) => {
     const currentKey = getWeekKey(0);
     const currentWD = newWeeks[currentKey];
     let newArchive = currentArchive;
@@ -242,7 +243,6 @@ export default function App() {
     if (currentWD) {
       const archivedIdx = currentArchive.findIndex(a => a.weekKey === currentKey);
       if (archivedIdx >= 0) {
-        // FIX 1: aggiorna la settimana già archiviata con i dati più recenti
         newArchive = currentArchive.map((a, idx) =>
           idx === archivedIdx
             ? { ...a, plan: currentWD.plan, meals: currentWD.meals || [] }
@@ -253,7 +253,7 @@ export default function App() {
     }
 
     setWeeks(newWeeks);
-    persist(newWeeks, newArchive, currentPrefs, currentPrefsHistory);
+    persist(newWeeks, newArchive, currentPrefsHistory, currentActivePrefs);
     return newArchive;
   }, [persist]);
 
@@ -269,7 +269,9 @@ export default function App() {
     const likedCtx = likedNames.length > 0
       ? ` L'utente apprezza: ${likedNames.slice(0, 8).join(", ")}. Ispirati a questi gusti.`
       : "";
-    const userMsg = `Genera 5 ricette diverse per pranzo da preparare in anticipo.${prefs ? " Preferenze/intolleranze: " + prefs + "." : ""}${likedCtx} Le 5 ricette devono essere completamente diverse tra loro per ingrediente principale.`;
+    // Usa activePrefs (quelle selezionate e persistenti)
+    const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
+    const userMsg = `Genera 5 ricette diverse per pranzo da preparare in anticipo.${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}${likedCtx} Le 5 ricette devono essere completamente diverse tra loro per ingrediente principale.`;
 
     let rawMeals;
     let usedFallback = false;
@@ -285,15 +287,8 @@ export default function App() {
     const plan = Object.fromEntries(DAYS.map((d, i) => [d, { ...meals[i], servings: 1 }]));
     const key = weekKey(tab);
 
-    // FIX 3: salva la preferenza nello storico se non vuota e non già presente
-    let newPrefsHistory = prefsHistory;
-    if (prefs.trim() && !prefsHistory.includes(prefs.trim())) {
-      newPrefsHistory = [prefs.trim(), ...prefsHistory].slice(0, 10);
-      setPrefsHistory(newPrefsHistory);
-    }
-
     const newWeeks = { ...weeks, [key]: { plan, locked: false, lockedList: null, meals } };
-    updateWeeks(newWeeks, archive, prefs, newPrefsHistory);
+    updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
 
     setLoading(false);
     setLoadingMsg("");
@@ -318,7 +313,7 @@ export default function App() {
       const newPlan = { ...wd.plan, [day]: { ...pick, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
-      updateWeeks(newWeeks, archive, prefs, prefsHistory);
+      updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
       notify("🔄 Sostituita con: " + pick.name);
       return;
     }
@@ -326,20 +321,21 @@ export default function App() {
     setLoading(true); setLoadingMsg("Cerco una ricetta alternativa...");
     const currentNames = DAYS.map(d => wd.plan[d]?.name).filter(Boolean).join(", ");
     try {
-      const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo, diversa da: ${currentNames}.${prefs ? " Preferenze: " + prefs : ""} Rispondi con array JSON di 1 elemento.`);
+      const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
+      const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo, diversa da: ${currentNames}.${prefsStr ? " Preferenze: " + prefsStr : ""} Rispondi con array JSON di 1 elemento.`);
       const meal = assignVisuals([parsed[0]])[0];
       const newMeals = [...(wd.meals || []), meal];
       const newPlan = { ...wd.plan, [day]: { ...meal, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan, meals: newMeals } };
-      updateWeeks(newWeeks, archive, prefs, prefsHistory);
+      updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
       notify("🔄 Sostituita con: " + meal.name);
     } catch {
       const fb = assignVisuals([FALLBACK_MEALS[Math.floor(Math.random() * FALLBACK_MEALS.length)]])[0];
       const newPlan = { ...wd.plan, [day]: { ...fb, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
-      updateWeeks(newWeeks, archive, prefs, prefsHistory);
+      updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
       notify("🔄 Sostituita con ricetta di esempio.");
     }
     setLoading(false); setLoadingMsg("");
@@ -353,7 +349,7 @@ export default function App() {
     const newPlan = { ...wd.plan, [day]: { ...meal, servings: Math.max(1, Math.min(10, n)) } };
     const key = weekKey(tab);
     const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
-    updateWeeks(newWeeks, archive, prefs, prefsHistory);
+    updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
   };
 
   // ── LOCK / UNLOCK ─────────────────────────────────────────────────────────
@@ -366,7 +362,7 @@ export default function App() {
     }
     const key = weekKey(tab);
     const newWeeks = { ...weeks, [key]: { ...wd, locked: true, lockedList: sl } };
-    updateWeeks(newWeeks, archive, prefs, prefsHistory);
+    updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
     notify("🔒 Settimana bloccata!");
   };
 
@@ -374,7 +370,7 @@ export default function App() {
     const wd = getWD(tab);
     const key = weekKey(tab);
     const newWeeks = { ...weeks, [key]: { ...wd, locked: false } };
-    updateWeeks(newWeeks, archive, prefs, prefsHistory);
+    updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
     notify("🔓 Settimana sbloccata.");
   };
 
@@ -385,7 +381,7 @@ export default function App() {
     if (archive.find(a => a.weekKey === key)) { notify("Già archiviata."); return; }
     const newArchive = [{ weekKey: key, plan: wd.plan, meals: wd.meals || [], likedIds: [] }, ...archive];
     setArchive(newArchive);
-    persist(weeks, newArchive, prefs, prefsHistory);
+    persist(weeks, newArchive, prefsHistory, activePrefs);
     notify("📦 Settimana archiviata!");
   };
 
@@ -396,7 +392,7 @@ export default function App() {
       return { ...a, likedIds: liked.includes(mealId) ? liked.filter(id => id !== mealId) : [...liked, mealId] };
     });
     setArchive(newArchive);
-    persist(weeks, newArchive, prefs, prefsHistory);
+    persist(weeks, newArchive, prefsHistory, activePrefs);
   };
 
   // ── RENDER ────────────────────────────────────────────────────────────────
@@ -492,32 +488,86 @@ export default function App() {
               <span style={{ color:"#6B5D4F", fontSize:12 }}>{plannedCount}/5 giorni pianificati</span>
               {!locked && (
                 <div style={{ display:"flex", gap:6 }}>
-                  <button onClick={() => setShowPrefs(!showPrefs)} style={{ padding:"6px 12px", borderRadius:40, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>⚙️ Preferenze</button>
+                  <button onClick={() => setShowPrefs(!showPrefs)} style={{ padding:"6px 12px", borderRadius:40, border: activePrefs.length > 0 ? "1.5px solid #4A7A6A" : "1.5px solid #C8BBA8", background: activePrefs.length > 0 ? "#E8F5EE" : "transparent", color: activePrefs.length > 0 ? "#4A7A6A" : "#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>⚙️ Preferenze{activePrefs.length > 0 ? ` (${activePrefs.length})` : ""}</button>
                   <button onClick={() => generateWeek(activeTab)} style={{ padding:"6px 16px", borderRadius:40, border:"none", background:"#D4A96A", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", boxShadow:"0 2px 8px rgba(212,169,106,.35)" }}>✨ Genera ricette</button>
                 </div>
               )}
             </div>
 
-            {/* FIX 3: Preferenze con storico */}
+            {/* Preferenze: tag attivi + storico */}
             {showPrefs && !locked && (
-              <div style={{ background:"#fff", borderRadius:12, padding:"13px 16px", border:"1.5px solid #EDE6D6", marginBottom:12 }}>
-                <label style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", display:"block", marginBottom:6 }}>Preferenze / intolleranze</label>
-                <div style={{ display:"flex", gap:8, marginBottom: prefsHistory.length > 0 ? 10 : 0 }}>
-                  <input value={prefs} onChange={e => { setPrefs(e.target.value); persist(weeks, archive, e.target.value, prefsHistory); }} placeholder="es. vegetariano, senza glutine, no pesce..." style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1.5px solid #C8BBA8", background:"#FDFAF5", fontSize:13, color:"#2C2C2C", fontFamily:"Georgia,serif", outline:"none" }} />
-                  <button onClick={() => { setShowPrefs(false); generateWeek(activeTab); }} style={{ padding:"8px 14px", borderRadius:8, border:"none", background:"#2C2C2C", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>Applica</button>
-                </div>
-                {prefsHistory.length > 0 && (
-                  <div>
-                    <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:6 }}>Usate in precedenza</div>
+              <div style={{ background:"#fff", borderRadius:12, padding:"14px 16px", border:"1.5px solid #EDE6D6", marginBottom:12 }}>
+
+                {/* Tag attivi */}
+                <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:8 }}>Preferenze attive (sempre usate nella generazione)</div>
+                {activePrefs.length === 0
+                  ? <div style={{ fontSize:12, color:"#B0A090", marginBottom:10, fontStyle:"italic" }}>Nessuna — le ricette saranno variate liberamente.</div>
+                  : <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:12 }}>
+                      {activePrefs.map((p, i) => (
+                        <div key={i} style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px 5px 12px", borderRadius:20, background:"#4A7A6A", color:"#fff", fontSize:12, fontFamily:"Georgia,serif" }}>
+                          <span>{p}</span>
+                          <button onClick={() => {
+                            const n = activePrefs.filter(x => x !== p);
+                            setActivePrefs(n);
+                            persist(weeks, archive, prefsHistory, n);
+                          }} style={{ background:"rgba(255,255,255,.3)", border:"none", color:"#fff", cursor:"pointer", width:16, height:16, borderRadius:"50%", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                }
+
+                {/* Storico disattivate */}
+                {prefsHistory.filter(p => !activePrefs.includes(p)).length > 0 && (
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:6 }}>Storico (clicca per riattivare)</div>
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                      {prefsHistory.map((p, i) => (
-                        <button key={i} onClick={() => setPrefs(p)} style={{ padding:"4px 10px", borderRadius:20, border:"1.5px solid #C8BBA8", background: prefs === p ? "#F5F0E8" : "transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer", fontFamily:"Georgia,serif" }}>
-                          {p}
+                      {prefsHistory.filter(p => !activePrefs.includes(p)).map((p, i) => (
+                        <button key={i} onClick={() => {
+                          const n = [...activePrefs, p];
+                          setActivePrefs(n);
+                          persist(weeks, archive, prefsHistory, n);
+                        }} style={{ padding:"4px 12px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#4A7A6A", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>
+                          + {p}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
+
+                {/* Aggiungi nuova */}
+                <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:6 }}>Aggiungi nuova preferenza</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <input value={prefsInput} onChange={e => setPrefsInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key !== "Enter" || !prefsInput.trim()) return;
+                      const val = prefsInput.trim();
+                      const newHist = prefsHistory.includes(val) ? prefsHistory : [val, ...prefsHistory].slice(0, 20);
+                      const newActive = activePrefs.includes(val) ? activePrefs : [...activePrefs, val];
+                      setPrefsHistory(newHist); setActivePrefs(newActive); setPrefsInput("");
+                      persist(weeks, archive, newHist, newActive);
+                    }}
+                    placeholder="es. senza glutine, vegetariano, no pesce… (Invio per aggiungere)"
+                    style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"1.5px solid #C8BBA8", background:"#FDFAF5", fontSize:13, color:"#2C2C2C", fontFamily:"Georgia,serif", outline:"none" }} />
+                  <button onClick={() => {
+                    const val = prefsInput.trim(); if (!val) return;
+                    const newHist = prefsHistory.includes(val) ? prefsHistory : [val, ...prefsHistory].slice(0, 20);
+                    const newActive = activePrefs.includes(val) ? activePrefs : [...activePrefs, val];
+                    setPrefsHistory(newHist); setActivePrefs(newActive); setPrefsInput("");
+                    persist(weeks, archive, newHist, newActive);
+                  }} style={{ padding:"8px 14px", borderRadius:8, border:"none", background:"#2C2C2C", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>+ Aggiungi</button>
+                </div>
+
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:14 }}>
+                  {prefsHistory.length > 0 && (
+                    <button onClick={() => {
+                      if (window.confirm("Cancellare tutto lo storico?")) {
+                        setPrefsHistory([]); setActivePrefs([]);
+                        persist(weeks, archive, [], []);
+                      }
+                    }} style={{ fontSize:11, color:"#C47A7A", background:"transparent", border:"none", cursor:"pointer", padding:0 }}>🗑 Cancella storico</button>
+                  )}
+                  <button onClick={() => setShowPrefs(false)} style={{ padding:"7px 18px", borderRadius:20, border:"none", background:"#D4A96A", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", marginLeft:"auto" }}>Chiudi</button>
+                </div>
               </div>
             )}
 
@@ -558,7 +608,7 @@ export default function App() {
                           <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                             <button onClick={() => { setShowRecipe(meal); setView("ricette"); }} style={{ padding:"4px 9px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer" }}>Ricetta</button>
                             {!locked && <button onClick={() => swapMeal(activeTab, day)} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#5A8A70", fontSize:12, cursor:"pointer" }}>🔄</button>}
-                            {!locked && <button onClick={() => { const np={...plan,[day]:null}; const key=weekKey(activeTab); const nw={...weeks,[key]:{...wd,plan:np}}; updateWeeks(nw,archive,prefs,prefsHistory); }} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #F0C4C4", background:"transparent", color:"#C47A7A", fontSize:11, cursor:"pointer" }}>✕</button>}
+                            {!locked && <button onClick={() => { const np={...plan,[day]:null}; const key=weekKey(activeTab); const nw={...weeks,[key]:{...wd,plan:np}}; updateWeeks(nw,archive,prefsHistory,activePrefs); }} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #F0C4C4", background:"transparent", color:"#C47A7A", fontSize:11, cursor:"pointer" }}>✕</button>}
                           </div>
                         </div>
                       ) : (
@@ -569,20 +619,20 @@ export default function App() {
                               const currentNames = DAYS.map(d => plan[d]?.name).filter(Boolean).join(", ");
                               setLoading(true); setLoadingMsg("Genero una ricetta per " + day + "...");
                               try {
-                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (prefs ? " Preferenze: " + prefs : "") + " Rispondi con array JSON di 1 elemento.");
+                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (activePrefs.length > 0 ? " Preferenze: " + activePrefs.join(", ") : "") + " Rispondi con array JSON di 1 elemento.");
                                 const meal = assignVisuals([parsed[0]])[0];
                                 const newMeals = [...(wd.meals || []), meal];
                                 const newPlan = { ...plan, [day]: { ...meal, servings: 1 } };
                                 const key = weekKey(activeTab);
                                 const nw = { ...weeks, [key]: { ...wd, plan: newPlan, meals: newMeals } };
-                                updateWeeks(nw, archive, prefs, prefsHistory);
+                                updateWeeks(nw, archive, prefsHistory, activePrefs);
                                 notify("✨ Ricetta generata per " + day + "!");
                               } catch {
                                 const fb = assignVisuals([FALLBACK_MEALS[Math.floor(Math.random() * FALLBACK_MEALS.length)]])[0];
                                 const newPlan = { ...plan, [day]: { ...fb, servings: 1 } };
                                 const key = weekKey(activeTab);
                                 const nw = { ...weeks, [key]: { ...wd, plan: newPlan } };
-                                updateWeeks(nw, archive, prefs, prefsHistory);
+                                updateWeeks(nw, archive, prefsHistory, activePrefs);
                                 notify("📋 Ricetta di esempio inserita per " + day);
                               }
                               setLoading(false); setLoadingMsg("");
