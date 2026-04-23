@@ -17,24 +17,7 @@ const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
-import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
 
-// ── FIREBASE CONFIG ────────────────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FB_API_KEY || "AIzaSyD9CxZxjoOJp89DJSdFF2H-73oeKtRqq7M",
-  authDomain: process.env.REACT_APP_FB_AUTH_DOMAIN || "meal-prep-studio.firebaseapp.com",
-  projectId: process.env.REACT_APP_FB_PROJECT_ID || "meal-prep-studio",
-  storageBucket: "meal-prep-studio.firebasestorage.app",
-  messagingSenderId: "439901909097",
-  appId: process.env.REACT_APP_FB_APP_ID || "1:439901909097:web:dd624037ebeb164c05b2f8"
-};
-
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
-const googleProvider = new GoogleAuthProvider();
 
 const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
