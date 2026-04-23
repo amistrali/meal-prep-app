@@ -287,32 +287,43 @@ export default function App() {
 
   // Auth listener — carica dati quando utente si logga/cambia
   useEffect(() => {
+    let unsubSnap = null;
+
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       setAuthReady(true);
+
+      // Cancella listener precedente se esiste
+      if (unsubSnap) { unsubSnap(); unsubSnap = null; }
+
       if (firebaseUser) {
-        // Carica dati utente da Firestore
-        const data = await fbLoad(firebaseUser.uid);
-        if (data) {
-          if (data.weeks) setWeeks(data.weeks);
-          if (data.archive) setArchive(data.archive);
-          if (data.prefsHistory) setPrefsHistory(data.prefsHistory);
-          if (data.activePrefs) setActivePrefs(data.activePrefs);
-        }
-        // Ascolta modifiche in tempo reale (sync multi-device)
-        const unsubSnap = onSnapshot(
-          doc(db, "users", firebaseUser.uid, "data", "main"),
-          (snap) => {
-            if (snap.exists()) {
-              const d = snap.data();
-              if (d.weeks) setWeeks(d.weeks);
-              if (d.archive) setArchive(d.archive);
-              if (d.prefsHistory) setPrefsHistory(d.prefsHistory);
-              if (d.activePrefs) setActivePrefs(d.activePrefs);
-            }
+        try {
+          // Carica dati iniziali da Firestore
+          const data = await fbLoad(firebaseUser.uid);
+          if (data) {
+            if (data.weeks) setWeeks(data.weeks);
+            if (data.archive) setArchive(data.archive);
+            if (data.prefsHistory) setPrefsHistory(data.prefsHistory);
+            if (data.activePrefs) setActivePrefs(data.activePrefs);
           }
-        );
-        return () => unsubSnap();
+          // Avvia listener real-time per sync multi-device
+          unsubSnap = onSnapshot(
+            doc(db, "users", firebaseUser.uid, "data", "main"),
+            (snap) => {
+              if (snap.exists()) {
+                const d = snap.data();
+                if (d.weeks) setWeeks(d.weeks);
+                if (d.archive) setArchive(d.archive);
+                if (d.prefsHistory) setPrefsHistory(d.prefsHistory);
+                if (d.activePrefs) setActivePrefs(d.activePrefs);
+              }
+              setReady(true); // pronto dopo primo snapshot
+            },
+            () => { setReady(true); } // pronto anche in caso di errore snapshot
+          );
+        } catch {
+          setReady(true); // pronto anche se Firestore fallisce
+        }
       } else {
         // Non loggato: carica da localStorage
         try {
@@ -325,10 +336,11 @@ export default function App() {
             if (d.activePrefs) setActivePrefs(d.activePrefs);
           }
         } catch {}
+        setReady(true);
       }
-      setReady(true);
     });
-    return () => unsub();
+
+    return () => { unsub(); if (unsubSnap) unsubSnap(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const persist = useCallback((newWeeks, newArchive, newPrefsHistory, newActivePrefs) => {
