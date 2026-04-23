@@ -265,6 +265,8 @@ function MealImage({ query, name, color, emoji, style }) {
 
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   const [weeks, setWeeks] = useState({});
   const [archive, setArchive] = useState([]);
   const [prefsInput, setPrefsInput] = useState(""); // campo di testo temporaneo
