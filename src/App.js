@@ -1,4 +1,40 @@
 import { useState, useCallback, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
+
+// ── FIREBASE CONFIG ────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FB_API_KEY || "AIzaSyD9CxZxjoOJp89DJSdFF2H-73oeKtRqq7M",
+  authDomain: process.env.REACT_APP_FB_AUTH_DOMAIN || "meal-prep-studio.firebaseapp.com",
+  projectId: process.env.REACT_APP_FB_PROJECT_ID || "meal-prep-studio",
+  storageBucket: "meal-prep-studio.firebasestorage.app",
+  messagingSenderId: "439901909097",
+  appId: process.env.REACT_APP_FB_APP_ID || "1:439901909097:web:dd624037ebeb164c05b2f8"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const googleProvider = new GoogleAuthProvider();
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
+
+// ── FIREBASE CONFIG ────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FB_API_KEY || "AIzaSyD9CxZxjoOJp89DJSdFF2H-73oeKtRqq7M",
+  authDomain: process.env.REACT_APP_FB_AUTH_DOMAIN || "meal-prep-studio.firebaseapp.com",
+  projectId: process.env.REACT_APP_FB_PROJECT_ID || "meal-prep-studio",
+  storageBucket: "meal-prep-studio.firebasestorage.app",
+  messagingSenderId: "439901909097",
+  appId: process.env.REACT_APP_FB_APP_ID || "1:439901909097:web:dd624037ebeb164c05b2f8"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const googleProvider = new GoogleAuthProvider();
 
 const COLORS = ["#D4A96A","#7BAF8E","#5B8DB8","#C4855A","#8FA656","#A67BAF","#AF7B8A","#6AA8AF"];
 const EMOJIS = ["🥗","🍝","🌾","🐟","🌯","🥙","🍱","🥘","🫕","🍛","🥦","🫙"];
@@ -51,29 +87,37 @@ function diffLists(prev, curr) {
 
 const emptyPlan = () => Object.fromEntries(DAYS.map(d => [d, null]));
 
-// ── STORAGE: usa localStorage su Vercel, window.storage nell'anteprima Claude ──
-const storage = {
-  async get(key) {
-    // Prova prima window.storage (anteprima Claude)
-    if (typeof window !== "undefined" && window.storage) {
-      try {
-        const r = await window.storage.get(key);
-        return r ? JSON.parse(r.value) : null;
-      } catch {}
-    }
-    // Fallback su localStorage (Vercel/browser standard)
+// ── FIREBASE SYNC ─────────────────────────────────────────────────────────
+// Salva/carica dati per utente su Firestore (sincronizzazione multi-device)
+// Fallback su localStorage se non loggato
+
+async function fbSave(uid, data) {
+  if (!uid) {
+    try { localStorage.setItem("mp-data", JSON.stringify(data)); } catch {}
+    return;
+  }
+  try {
+    await setDoc(doc(db, "users", uid, "data", "main"), data, { merge: true });
+  } catch (e) {
+    console.error("Firebase save error:", e);
+  }
+}
+
+async function fbLoad(uid) {
+  if (!uid) {
     try {
-      const v = localStorage.getItem(key);
+      const v = localStorage.getItem("mp-data");
       return v ? JSON.parse(v) : null;
     } catch { return null; }
-  },
-  async set(key, val) {
-    if (typeof window !== "undefined" && window.storage) {
-      try { await window.storage.set(key, JSON.stringify(val)); return; } catch {}
-    }
-    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
   }
-};
+  try {
+    const snap = await getDoc(doc(db, "users", uid, "data", "main"));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.error("Firebase load error:", e);
+    return null;
+  }
+}
 
 // ── API ────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei un nutrizionista esperto in meal prep per pranzi di ufficio.
@@ -256,28 +300,61 @@ export default function App() {
   const [apiError, setApiError] = useState("");
   const [checkedSl, setCheckedSl] = useState({}); // shopping list item checks
 
-  // Load all persisted state on mount
+  // Auth listener — carica dati quando utente si logga/cambia
   useEffect(() => {
-    Promise.all([
-      storage.get("mp-weeks"),
-      storage.get("mp-archive"),
-      storage.get("mp-prefs-history"),
-      storage.get("mp-active-prefs"),
-    ]).then(([w, a, ph, ap]) => {
-      if (w) setWeeks(w);
-      if (a) setArchive(a);
-      if (ph) setPrefsHistory(ph);
-      if (ap) setActivePrefs(ap);
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
+      setAuthReady(true);
+      if (firebaseUser) {
+        // Carica dati utente da Firestore
+        const data = await fbLoad(firebaseUser.uid);
+        if (data) {
+          if (data.weeks) setWeeks(data.weeks);
+          if (data.archive) setArchive(data.archive);
+          if (data.prefsHistory) setPrefsHistory(data.prefsHistory);
+          if (data.activePrefs) setActivePrefs(data.activePrefs);
+        }
+        // Ascolta modifiche in tempo reale (sync multi-device)
+        const unsubSnap = onSnapshot(
+          doc(db, "users", firebaseUser.uid, "data", "main"),
+          (snap) => {
+            if (snap.exists()) {
+              const d = snap.data();
+              if (d.weeks) setWeeks(d.weeks);
+              if (d.archive) setArchive(d.archive);
+              if (d.prefsHistory) setPrefsHistory(d.prefsHistory);
+              if (d.activePrefs) setActivePrefs(d.activePrefs);
+            }
+          }
+        );
+        return () => unsubSnap();
+      } else {
+        // Non loggato: carica da localStorage
+        try {
+          const raw = localStorage.getItem("mp-data");
+          if (raw) {
+            const d = JSON.parse(raw);
+            if (d.weeks) setWeeks(d.weeks);
+            if (d.archive) setArchive(d.archive);
+            if (d.prefsHistory) setPrefsHistory(d.prefsHistory);
+            if (d.activePrefs) setActivePrefs(d.activePrefs);
+          }
+        } catch {}
+      }
       setReady(true);
     });
-  }, []);
+    return () => unsub();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const persist = useCallback((newWeeks, newArchive, newPrefsHistory, newActivePrefs) => {
-    storage.set("mp-weeks", newWeeks);
-    storage.set("mp-archive", newArchive);
-    if (newPrefsHistory !== undefined) storage.set("mp-prefs-history", newPrefsHistory);
-    if (newActivePrefs !== undefined) storage.set("mp-active-prefs", newActivePrefs);
-  }, []);
+    const data = {
+      weeks: newWeeks,
+      archive: newArchive,
+      prefsHistory: newPrefsHistory ?? prefsHistory,
+      activePrefs: newActivePrefs ?? activePrefs,
+    };
+    fbSave(user?.uid || null, data);
+  }, [user, prefsHistory, activePrefs]);
 
   const notify = (msg) => { setNotification(msg); setTimeout(() => setNotification(""), 3000); };
 
@@ -462,9 +539,59 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setCheckedSl(Object.fromEntries(sl.map(i => [i.name, true]))); }, [slKey]);
 
+  // Auth not yet initialized
+  if (!authReady) return (
+    <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#6B5D4F", fontSize:16 }}>
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:40, marginBottom:12 }}>🥗</div>
+        <div>Caricamento...</div>
+      </div>
+    </div>
+  );
+
+  // Not logged in — show login screen
+  if (!user) return (
+    <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", padding:24 }}>
+      <div style={{ maxWidth:380, width:"100%", textAlign:"center" }}>
+        <div style={{ fontSize:64, marginBottom:16 }}>🥗</div>
+        <div style={{ fontSize:11, letterSpacing:4, color:"#9A8A72", textTransform:"uppercase", marginBottom:8 }}>Meal Prep Studio</div>
+        <h1 style={{ margin:"0 0 8px", fontSize:28, fontWeight:400, color:"#2C2C2C" }}>
+          I tuoi pranzi<br /><span style={{ fontStyle:"italic", color:"#7BAF8E" }}>settimanali</span>
+        </h1>
+        <p style={{ color:"#6B5D4F", fontSize:14, lineHeight:1.7, margin:"0 0 32px" }}>
+          Pianifica i tuoi pranzi, genera ricette con AI e sincronizza tutto tra i tuoi dispositivi.
+        </p>
+        <button
+          onClick={async () => {
+            try {
+              await signInWithPopup(auth, googleProvider);
+            } catch (e) {
+              alert("Errore login: " + e.message);
+            }
+          }}
+          style={{
+            width:"100%", padding:"14px 24px", borderRadius:40,
+            border:"none", background:"#fff", color:"#2C2C2C",
+            fontSize:15, cursor:"pointer", fontFamily:"Georgia,serif",
+            boxShadow:"0 4px 16px rgba(0,0,0,0.12)",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:12,
+          }}>
+          <img src="https://www.google.com/favicon.ico" alt="G" style={{ width:20, height:20 }} />
+          Accedi con Google
+        </button>
+        <p style={{ color:"#B0A090", fontSize:11, marginTop:16 }}>
+          I tuoi dati sono privati e sincronizzati su tutti i tuoi device.
+        </p>
+      </div>
+    </div>
+  );
+
   if (!ready) return (
     <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#6B5D4F", fontSize:16 }}>
-      Caricamento...
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:40, marginBottom:12 }}>🥗</div>
+        <div>Caricamento dati...</div>
+      </div>
     </div>
   );
 
@@ -500,12 +627,23 @@ export default function App() {
           <div style={{ fontSize:10, letterSpacing:4, color:"#9A8A72", textTransform:"uppercase", marginBottom:2 }}>Meal Prep Studio</div>
           <h1 style={{ margin:0, fontSize:24, fontWeight:400, color:"#2C2C2C", lineHeight:1.2 }}>I tuoi pranzi <span style={{ fontStyle:"italic", color:"#7BAF8E" }}>settimanali</span></h1>
         </div>
-        <div style={{ display:"flex", gap:5, flexWrap:"wrap", paddingTop:4 }}>
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap", paddingTop:4, alignItems:"center" }}>
           {["planner","ricette","spesa","archivio"].map(v => (
             <button key={v} onClick={() => { setView(v); setShowRecipe(null); setArchiveDetail(null); }} style={{ padding:"7px 14px", borderRadius:40, border:view===v?"none":"1.5px solid #C8BBA8", background:view===v?"#2C2C2C":"transparent", color:view===v?"#F5F0E8":"#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>
               {v==="planner"?"📅 Planner":v==="ricette"?"📋 Ricette":v==="spesa"?"🛒 Spesa":"📦 Archivio"}
             </button>
           ))}
+          {/* User avatar + logout */}
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginLeft:4, paddingLeft:8, borderLeft:"1.5px solid #EDE6D6" }}>
+            {user?.photoURL
+              ? <img src={user.photoURL} alt="avatar" style={{ width:28, height:28, borderRadius:"50%", objectFit:"cover" }} />
+              : <div style={{ width:28, height:28, borderRadius:"50%", background:"#7BAF8E", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:13, fontWeight:600 }}>{(user?.displayName||"U")[0].toUpperCase()}</div>
+            }
+            <button onClick={() => { if (window.confirm("Vuoi uscire dall'account?")) signOut(auth); }}
+              style={{ padding:"4px 10px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#9A8A72", fontSize:11, cursor:"pointer", fontFamily:"Georgia,serif" }}>
+              Esci
+            </button>
+          </div>
         </div>
       </header>
 
