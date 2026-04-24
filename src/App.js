@@ -139,19 +139,41 @@ async function callClaudeAPI(userMsg) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 3000,
+      max_tokens: 4000,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMsg }],
     }),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`HTTP ${response.status}: ${errText}`);
+  }
   const data = await response.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
   const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-  if (!text) throw new Error("Risposta vuota");
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("Nessun JSON trovato");
-  const parsed = JSON.parse(match[0]);
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Array vuoto");
+  if (!text) throw new Error("Risposta vuota dal modello");
+
+  // Parsing robusto: prova JSON diretto, poi estrai array, poi cerca oggetti
+  let parsed = null;
+  const cleaned = text.replace(/```json/g,"").replace(/```/g,"").trim();
+  try { parsed = JSON.parse(cleaned); } catch {}
+  if (!parsed) {
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (match) {
+      try { parsed = JSON.parse(match[0]); } catch {}
+    }
+  }
+  // Ultimo tentativo: estrai oggetti singoli e costruisci array
+  if (!parsed || !Array.isArray(parsed)) {
+    const objMatches = [...cleaned.matchAll(/\{[\s\S]*?"steps"[\s\S]*?\}\s*(?=,|\]|$)/g)];
+    if (objMatches.length > 0) {
+      try { parsed = objMatches.map(m => JSON.parse(m[0])); } catch {}
+    }
+  }
+  if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
+    console.error("Risposta API non parsabile:", text.slice(0, 500));
+    throw new Error("Formato risposta non valido");
+  }
   return parsed;
 }
 
