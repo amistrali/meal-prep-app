@@ -122,8 +122,16 @@ Ogni elemento:
 "imageQuery":"query in inglese specifica per trovare una foto del piatto finito (es: 'salmon poke bowl avocado rice', 'shakshuka eggs tomato', 'chicken shawarma wrap')",
 "recipeUrl":"URL di una ricetta italiana autentica su giallozafferano.it, cucchiaio.it, fattoincasadabenedetta.it — lascia stringa vuota se non sei sicuro al 100%",
 "videoQuery":"query YouTube in italiano specifica per trovare un video di preparazione (es: 'poke bowl salmone ricetta facile')",
-"ingredients":[{"name":"string","qty":number,"unit":"string"}],"steps":["string"]}
-qty è sempre riferito a 1 porzione.`;
+"ingredients":[{"name":"string","qty":number,"unit":"string"}],
+"steps":[
+  "PREPARAZIONE: descrizione dettagliata del passaggio con temperatura, tempi precisi, consistenza attesa, consigli visivi (es. 'rosola il pollo a fuoco medio-alto per 6-7 minuti per lato finché non è dorato e non rilascia più liquido rosa')",
+  "ogni step deve essere autonomo e completo, con tutti i dettagli necessari per un cuoco alle prime armi",
+  "includi consigli pratici: come capire la cottura giusta, come non sbagliare, varianti possibili",
+  "l'ultimo step deve includere come conservare, per quanti giorni e come rigenerare il piatto prima di mangiarlo"
+],
+"tips":"2-3 consigli del cuoco: varianti, sostituzioni ingredienti, errori comuni da evitare",
+"prepNotes":"nota sulla preparazione anticipata: cosa fare la domenica sera e cosa lasciare per il giorno stesso"}
+qty è sempre riferito a 1 porzione. Gli steps devono essere almeno 5 e massimo 8, ognuno di almeno 2 righe di testo dettagliato.`;
 
 async function callClaudeAPI(userMsg) {
   const response = await fetch("/api/claude", {
@@ -1003,14 +1011,52 @@ export default function App() {
                       )}
                     </div>
                   )}
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr" }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"300px 1fr" }}>
                     <div style={{ padding:"18px 20px", borderRight:"1.5px solid #EDE6D6" }}>
                       <h3 style={{ fontSize:10, letterSpacing:3, color:"#9A8A72", textTransform:"uppercase", marginBottom:10, marginTop:0 }}>Ingredienti (1 porzione)</h3>
-                      {(showRecipe.ingredients||[]).map((ing,i)=><div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid #F0EBE0", fontSize:12, color:"#2C2C2C" }}><span>{ing.name}</span><span style={{color:"#9A8A72"}}>{ing.qty} {ing.unit}</span></div>)}
+                      {(showRecipe.ingredients||[]).map((ing,i)=>(
+                        <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 0", borderBottom:"1px solid #F0EBE0", fontSize:13, color:"#2C2C2C" }}>
+                          <span>{ing.name}</span>
+                          <span style={{ color:"#fff", background: showRecipe.color+"CC", borderRadius:20, padding:"2px 9px", fontSize:11, flexShrink:0, marginLeft:8 }}>{ing.qty} {ing.unit}</span>
+                        </div>
+                      ))}
+                      {/* Info nutrizionali */}
+                      <div style={{ marginTop:16, padding:"10px 12px", background:"#F5F0E8", borderRadius:10 }}>
+                        <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:8 }}>Info nutrizionali</div>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                          <div style={{ textAlign:"center", padding:"8px", background:"#fff", borderRadius:8 }}>
+                            <div style={{ fontSize:16, fontWeight:600, color:showRecipe.color }}>{showRecipe.kcal}</div>
+                            <div style={{ fontSize:9, color:"#9A8A72", textTransform:"uppercase", letterSpacing:1 }}>Kcal</div>
+                          </div>
+                          <div style={{ textAlign:"center", padding:"8px", background:"#fff", borderRadius:8 }}>
+                            <div style={{ fontSize:16, fontWeight:600, color:showRecipe.color }}>{showRecipe.prep}'</div>
+                            <div style={{ fontSize:9, color:"#9A8A72", textTransform:"uppercase", letterSpacing:1 }}>Minuti</div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     <div style={{ padding:"18px 20px" }}>
-                      <h3 style={{ fontSize:10, letterSpacing:3, color:"#9A8A72", textTransform:"uppercase", marginBottom:10, marginTop:0 }}>Procedimento</h3>
-                      {(showRecipe.steps||[]).map((step,i)=><div key={i} style={{ display:"flex", gap:10, marginBottom:10 }}><div style={{ width:19, height:19, borderRadius:"50%", flexShrink:0, background:showRecipe.color+"33", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, color:showRecipe.color }}>{i+1}</div><p style={{ margin:0, fontSize:12, color:"#4A4035", lineHeight:1.6 }}>{step}</p></div>)}
+                      <h3 style={{ fontSize:10, letterSpacing:3, color:"#9A8A72", textTransform:"uppercase", marginBottom:12, marginTop:0 }}>Procedimento</h3>
+                      {(showRecipe.steps||[]).map((step,i) => (
+                        <div key={i} style={{ display:"flex", gap:12, marginBottom:14, padding:"12px 14px", background: i%2===0 ? "#FDFAF5" : "#fff", borderRadius:10, border:"1.5px solid #EDE6D6" }}>
+                          <div style={{ width:26, height:26, borderRadius:"50%", flexShrink:0, background:showRecipe.color, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#fff", marginTop:1 }}>{i+1}</div>
+                          <p style={{ margin:0, fontSize:13, color:"#2C2C2C", lineHeight:1.75 }}>{step}</p>
+                        </div>
+                      ))}
+                      {/* Tips del cuoco */}
+                      {showRecipe.tips && (
+                        <div style={{ marginTop:16, padding:"14px 16px", background:"#FFF8EC", borderRadius:12, border:"1.5px solid #EDD4A0" }}>
+                          <div style={{ fontSize:10, letterSpacing:2, color:"#D4A96A", textTransform:"uppercase", marginBottom:8, fontWeight:600 }}>💡 Consigli del cuoco</div>
+                          <p style={{ margin:0, fontSize:12, color:"#6B5D4F", lineHeight:1.7 }}>{showRecipe.tips}</p>
+                        </div>
+                      )}
+                      {/* Note meal prep */}
+                      {showRecipe.prepNotes && (
+                        <div style={{ marginTop:10, padding:"14px 16px", background:"#E8F5EE", borderRadius:12, border:"1.5px solid #A8C4B4" }}>
+                          <div style={{ fontSize:10, letterSpacing:2, color:"#4A7A6A", textTransform:"uppercase", marginBottom:8, fontWeight:600 }}>📦 Preparazione anticipata</div>
+                          <p style={{ margin:0, fontSize:12, color:"#4A7A6A", lineHeight:1.7 }}>{showRecipe.prepNotes}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
