@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
 
 // ── FIREBASE CONFIG ────────────────────────────────────────────────────────
@@ -104,15 +104,24 @@ async function fbLoad(uid) {
 
 // ── API ────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei un nutrizionista esperto in meal prep per pranzi di ufficio.
-Genera esattamente 5 ricette DIVERSE tra loro per una settimana lavorativa.
-Ogni ricetta: preparabile in anticipo, conservabile 3-4 giorni in frigo, max 30 min di prep, equilibrata e sana, trasportabile in contenitore.
-Le 5 devono coprire categorie diverse: cereali integrali, legumi, pesce, carne magra, vegano.
+Genera esattamente 5 ricette COMPLETAMENTE DIVERSE tra loro per una settimana lavorativa.
+
+REGOLE DI VARIETÀ (obbligatorie):
+- Ogni ricetta deve avere un INGREDIENTE PROTEICO DIVERSO: es. pollo, tonno, salmone, legumi, uova, tofu, manzo, gamberetti, sgombro, tacchino, ceci, lenticchie, feta, mozzarella...
+- Ogni ricetta deve avere una BASE DIVERSA: es. riso integrale, farro, quinoa, pasta integrale, patate dolci, pane integrale, insalata, zucchine, avocado...
+- Le cucine devono variare: italiana, mediterranea, asiatica, mediorientale, messicana, nordica...
+- Evita assolutamente di ripetere lo stesso ingrediente principale in due ricette diverse
+- NON generare sempre bowl, wrap e insalate — varia il formato: zuppe fredde, frittate, tartine, poke, burritos, shakshuka fredda, pasta fredda, couscous, tabbouleh, niçoise, banh mi integrale...
+
+Ogni ricetta: preparabile in anticipo, conservabile 3-4 giorni in frigo, max 30 min di prep, equilibrata (proteine + carboidrati complessi + grassi buoni + verdure), trasportabile in contenitore.
+Le 5 devono coprire categorie diverse: almeno una a base di cereali integrali, una di legumi, una di pesce, una di carne magra o uova, una vegana o vegetariana.
+
 IMPORTANTE: Rispondi ESCLUSIVAMENTE con un array JSON valido, nessun testo prima o dopo, nessun markdown.
 Ogni elemento:
 {"name":"string","kcal":number,"prep":number,"tags":["string"],
-"imageQuery":"breve query in inglese per trovare una foto del piatto (es: 'farro bowl chicken vegetables')",
-"recipeUrl":"URL di una ricetta italiana autentica su siti come giallozafferano.it, ricette.it, fattoincasadabenedetta.it, cucchiaio.it — lascia stringa vuota se non sei sicuro",
-"videoQuery":"query YouTube in italiano per trovare un video di preparazione (es: 'bowl di farro con pollo ricetta')",
+"imageQuery":"query in inglese specifica per trovare una foto del piatto finito (es: 'salmon poke bowl avocado rice', 'shakshuka eggs tomato', 'chicken shawarma wrap')",
+"recipeUrl":"URL di una ricetta italiana autentica su giallozafferano.it, cucchiaio.it, fattoincasadabenedetta.it — lascia stringa vuota se non sei sicuro al 100%",
+"videoQuery":"query YouTube in italiano specifica per trovare un video di preparazione (es: 'poke bowl salmone ricetta facile')",
 "ingredients":[{"name":"string","qty":number,"unit":"string"}],"steps":["string"]}
 qty è sempre riferito a 1 porzione.`;
 
@@ -139,6 +148,161 @@ async function callClaudeAPI(userMsg) {
 }
 
 // ── APP ────────────────────────────────────────────────────────────────────
+// ── LOGIN SCREEN ──────────────────────────────────────────────────────────
+function LoginScreen() {
+  const [mode, setMode] = useState("login"); // login | register | reset
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleGoogle = async () => {
+    setError(""); setLoading(true);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (e) {
+      setError(translateError(e.code));
+    }
+    setLoading(false);
+  };
+
+  const handleEmailAuth = async () => {
+    setError(""); setMessage("");
+    if (!email.trim() || !password.trim()) { setError("Inserisci email e password."); return; }
+    if (mode === "register" && password !== confirmPassword) { setError("Le password non coincidono."); return; }
+    if (mode === "register" && password.length < 6) { setError("La password deve avere almeno 6 caratteri."); return; }
+    setLoading(true);
+    try {
+      if (mode === "login") {
+        await signInWithEmailAndPassword(auth, email.trim(), password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email.trim(), password);
+      }
+    } catch (e) {
+      setError(translateError(e.code));
+    }
+    setLoading(false);
+  };
+
+  const handleReset = async () => {
+    setError(""); setMessage("");
+    if (!email.trim()) { setError("Inserisci la tua email per reimpostare la password."); return; }
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setMessage("Email inviata! Controlla la tua casella di posta.");
+    } catch (e) {
+      setError(translateError(e.code));
+    }
+    setLoading(false);
+  };
+
+  function translateError(code) {
+    const map = {
+      "auth/user-not-found": "Nessun account trovato con questa email.",
+      "auth/wrong-password": "Password errata.",
+      "auth/email-already-in-use": "Email già registrata. Prova ad accedere.",
+      "auth/invalid-email": "Email non valida.",
+      "auth/weak-password": "Password troppo debole (minimo 6 caratteri).",
+      "auth/invalid-credential": "Email o password errati.",
+      "auth/too-many-requests": "Troppi tentativi. Riprova tra qualche minuto.",
+      "auth/popup-closed-by-user": "Finestra chiusa. Riprova.",
+    };
+    return map[code] || "Errore: " + code;
+  }
+
+  const inp = { width:"100%", padding:"10px 14px", borderRadius:10, border:"1.5px solid #C8BBA8", background:"#FDFAF5", fontSize:14, color:"#2C2C2C", fontFamily:"Georgia,serif", outline:"none", boxSizing:"border-box" };
+  const btnPrimary = { width:"100%", padding:"12px", borderRadius:40, border:"none", background:"#2C2C2C", color:"#F5F0E8", fontSize:14, cursor:"pointer", fontFamily:"Georgia,serif", marginTop:8, opacity: loading ? 0.7 : 1 };
+  const btnLink = { background:"none", border:"none", color:"#7BAF8E", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", textDecoration:"underline", padding:0 };
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", padding:24 }}>
+      <div style={{ maxWidth:380, width:"100%" }}>
+        {/* Logo */}
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:56, marginBottom:10 }}>🥗</div>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#9A8A72", textTransform:"uppercase", marginBottom:6 }}>Meal Prep Studio</div>
+          <h1 style={{ margin:0, fontSize:26, fontWeight:400, color:"#2C2C2C" }}>
+            {mode === "login" ? "Bentornato" : mode === "register" ? "Crea account" : "Reimposta password"}
+          </h1>
+        </div>
+
+        <div style={{ background:"#fff", borderRadius:20, padding:"24px 24px", border:"1.5px solid #EDE6D6", boxShadow:"0 4px 20px rgba(0,0,0,.06)" }}>
+
+          {/* Google login */}
+          {mode !== "reset" && (
+            <>
+              <button onClick={handleGoogle} disabled={loading} style={{ width:"100%", padding:"11px", borderRadius:40, border:"1.5px solid #EDE6D6", background:"#fff", color:"#2C2C2C", fontSize:14, cursor:"pointer", fontFamily:"Georgia,serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10, marginBottom:16 }}>
+                <img src="https://www.google.com/favicon.ico" alt="G" style={{ width:18, height:18 }} />
+                {mode === "login" ? "Accedi con Google" : "Registrati con Google"}
+              </button>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+                <div style={{ flex:1, height:1, background:"#EDE6D6" }} />
+                <span style={{ fontSize:11, color:"#9A8A72" }}>oppure</span>
+                <div style={{ flex:1, height:1, background:"#EDE6D6" }} />
+              </div>
+            </>
+          )}
+
+          {/* Email field */}
+          <div style={{ marginBottom:10 }}>
+            <label style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", display:"block", marginBottom:5 }}>Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="tua@email.it" style={inp}
+              onKeyDown={e => e.key === "Enter" && (mode === "reset" ? handleReset() : handleEmailAuth())} />
+          </div>
+
+          {/* Password fields */}
+          {mode !== "reset" && (
+            <div style={{ marginBottom: mode === "register" ? 10 : 16 }}>
+              <label style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", display:"block", marginBottom:5 }}>Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={inp}
+                onKeyDown={e => e.key === "Enter" && handleEmailAuth()} />
+            </div>
+          )}
+          {mode === "register" && (
+            <div style={{ marginBottom:16 }}>
+              <label style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", display:"block", marginBottom:5 }}>Conferma password</label>
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="••••••••" style={inp}
+                onKeyDown={e => e.key === "Enter" && handleEmailAuth()} />
+            </div>
+          )}
+
+          {/* Error / message */}
+          {error && <div style={{ padding:"9px 12px", borderRadius:8, background:"#FFF0F0", border:"1px solid #F0C4C4", color:"#C47A7A", fontSize:12, marginBottom:12 }}>{error}</div>}
+          {message && <div style={{ padding:"9px 12px", borderRadius:8, background:"#E8F5EE", border:"1px solid #A8C4B4", color:"#4A7A6A", fontSize:12, marginBottom:12 }}>{message}</div>}
+
+          {/* Main button */}
+          <button onClick={mode === "reset" ? handleReset : handleEmailAuth} disabled={loading} style={btnPrimary}>
+            {loading ? "..." : mode === "login" ? "Accedi" : mode === "register" ? "Crea account" : "Invia email di reset"}
+          </button>
+
+          {/* Mode switchers */}
+          <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8, alignItems:"center" }}>
+            {mode === "login" && (
+              <>
+                <span style={{ fontSize:12, color:"#6B5D4F" }}>Non hai un account? <button style={btnLink} onClick={() => { setMode("register"); setError(""); setMessage(""); }}>Registrati</button></span>
+                <button style={btnLink} onClick={() => { setMode("reset"); setError(""); setMessage(""); }}>Password dimenticata?</button>
+              </>
+            )}
+            {mode === "register" && (
+              <span style={{ fontSize:12, color:"#6B5D4F" }}>Hai già un account? <button style={btnLink} onClick={() => { setMode("login"); setError(""); setMessage(""); }}>Accedi</button></span>
+            )}
+            {mode === "reset" && (
+              <button style={btnLink} onClick={() => { setMode("login"); setError(""); setMessage(""); }}>← Torna al login</button>
+            )}
+          </div>
+        </div>
+
+        <p style={{ textAlign:"center", color:"#B0A090", fontSize:11, marginTop:16 }}>
+          I tuoi dati sono privati e sincronizzati su tutti i tuoi device.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── MEAL IMAGE ────────────────────────────────────────────────────────────
 // Usa Pexels API per foto pertinenti (gratuita, 200 req/ora)
 // Imposta la tua chiave Pexels nella variabile PEXELS_API_KEY qui sotto
@@ -547,41 +711,7 @@ export default function App() {
   );
 
   // Not logged in — show login screen
-  if (!user) return (
-    <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", padding:24 }}>
-      <div style={{ maxWidth:380, width:"100%", textAlign:"center" }}>
-        <div style={{ fontSize:64, marginBottom:16 }}>🥗</div>
-        <div style={{ fontSize:11, letterSpacing:4, color:"#9A8A72", textTransform:"uppercase", marginBottom:8 }}>Meal Prep Studio</div>
-        <h1 style={{ margin:"0 0 8px", fontSize:28, fontWeight:400, color:"#2C2C2C" }}>
-          I tuoi pranzi<br /><span style={{ fontStyle:"italic", color:"#7BAF8E" }}>settimanali</span>
-        </h1>
-        <p style={{ color:"#6B5D4F", fontSize:14, lineHeight:1.7, margin:"0 0 32px" }}>
-          Pianifica i tuoi pranzi, genera ricette con AI e sincronizza tutto tra i tuoi dispositivi.
-        </p>
-        <button
-          onClick={async () => {
-            try {
-              await signInWithPopup(auth, googleProvider);
-            } catch (e) {
-              alert("Errore login: " + e.message);
-            }
-          }}
-          style={{
-            width:"100%", padding:"14px 24px", borderRadius:40,
-            border:"none", background:"#fff", color:"#2C2C2C",
-            fontSize:15, cursor:"pointer", fontFamily:"Georgia,serif",
-            boxShadow:"0 4px 16px rgba(0,0,0,0.12)",
-            display:"flex", alignItems:"center", justifyContent:"center", gap:12,
-          }}>
-          <img src="https://www.google.com/favicon.ico" alt="G" style={{ width:20, height:20 }} />
-          Accedi con Google
-        </button>
-        <p style={{ color:"#B0A090", fontSize:11, marginTop:16 }}>
-          I tuoi dati sono privati e sincronizzati su tutti i tuoi device.
-        </p>
-      </div>
-    </div>
-  );
+  if (!user) return <LoginScreen />;
 
   if (!ready) return (
     <div style={{ minHeight:"100vh", background:"#F5F0E8", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#6B5D4F", fontSize:16 }}>
