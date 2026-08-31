@@ -139,10 +139,68 @@ Ogni elemento:
 "prepNotes":"nota sulla preparazione anticipata: cosa fare la domenica sera e cosa lasciare per il giorno stesso"}
 qty è sempre riferito a 1 porzione. Gli steps devono essere almeno 5 e massimo 8, ognuno di almeno 2 righe di testo dettagliato.`;
 
-// Ogni ricetta costa circa 600 token in uscita: il tetto deve seguire il
-// numero di ricette chieste, altrimenti la risposta si tronca a meta' JSON.
+// Misurato sul prompt reale: una ricetta completa costa poco piu' di 1000 token
+// in uscita. Il tetto e' generoso di proposito — si paga l'output effettivo, non
+// il tetto, mentre una risposta troncata butta via l'intera chiamata.
 function tokensFor(count) {
-  return Math.min(16000, 900 * count + 600);
+  return Math.min(16000, 1500 * count + 800);
+}
+
+// Categorie assegnate ai singoli blocchi: garantiscono la varieta' per
+// costruzione, invece di sperare che una singola risposta si autoregoli.
+const CATEGORIE = [
+  "a base di pesce o frutti di mare",
+  "a base di legumi",
+  "a base di carne bianca o uova",
+  "vegetariana o vegana",
+  "a base di cereali integrali",
+  "della tradizione italiana classica",
+  "di cucina mediorientale o nordafricana",
+  "di cucina asiatica",
+  "a base di verdure al forno",
+  "un piatto unico freddo da contenitore"
+];
+
+// Genera `count` ricette con piu' chiamate parallele da 2.
+// Una sola chiamata da 8+ ricette supera il tetto di token e impiega oltre due
+// minuti: sul telefono il browser chiude la connessione prima della risposta.
+// Spezzata in blocchi paralleli, il tempo d'attesa e' quello del blocco piu'
+// lento e un blocco fallito non fa cadere l'intera generazione.
+async function generateRecipes(count, prefsStr, likedCtx, extraIstruzioni = "") {
+  const cats = [...CATEGORIE].sort(() => Math.random() - 0.5);
+  const blocchi = [];
+  let c = 0;
+  for (let i = 0; i < count; i += 2) {
+    const n = Math.min(2, count - i);
+    const catBlocco = [];
+    for (let k = 0; k < n; k++) catBlocco.push(cats[c++ % cats.length]);
+    blocchi.push(catBlocco);
+  }
+
+  const esiti = await Promise.allSettled(blocchi.map((catBlocco, idx) => {
+    const n = Math.max(1, catBlocco.length);
+    const richiesta =
+      `Genera ${n} ricette per pranzo da preparare in anticipo` +
+      (catBlocco.length ? `: ${catBlocco.map(c => "una ricetta " + c).join(", ")}` : "") + "." +
+      (prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : "") +
+      likedCtx + extraIstruzioni +
+      ` Rispondi con un array JSON di ${n} elementi.`;
+    return callClaudeAPI(richiesta, tokensFor(n)).catch(e => { throw new Error(`blocco ${idx}: ${e.message}`); });
+  }));
+
+  const visti = new Set();
+  const meals = [];
+  for (const e of esiti) {
+    if (e.status !== "fulfilled") continue;
+    for (const m of e.value) {
+      const k = String(m?.name || "").toLowerCase().trim();
+      if (!k || visti.has(k)) continue;
+      visti.add(k);
+      meals.push(m);
+    }
+  }
+  if (meals.length === 0) throw new Error("Nessun blocco ha risposto");
+  return meals;
 }
 
 async function callClaudeAPI(userMsg, maxTokens = 4000) {
@@ -685,8 +743,8 @@ export default function App() {
     setLoading(true);
     setApiError("");
     setLoadingMsg(level === 1
-      ? "Genero le ricette e cerco i video di preparazione..."
-      : `Rigenero con priorità video ${level}/3 — cerco più a fondo...`);
+      ? `Genero ${candidateCount} ricette in parallelo (circa un minuto)...`
+      : `Rigenero con priorità video ${level}/3 — ${candidateCount} ricette, cerco più a fondo...`);
 
     const likedNames = archive.flatMap(a =>
       (a.likedIds || []).map(id => a.meals?.find(m => m.id === id)?.name).filter(Boolean)
@@ -695,13 +753,11 @@ export default function App() {
       ? ` L'utente apprezza: ${likedNames.slice(0, 8).join(", ")}. Ispirati a questi gusti.`
       : "";
     const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
-    const userMsg = `Genera ${candidateCount} ricette diverse per pranzo da preparare in anticipo.${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}${likedCtx} Devono essere completamente diverse tra loro per ingrediente principale.`;
-
     let rawMeals;
     let usedFallback = false;
 
     try {
-      rawMeals = await callClaudeAPI(userMsg, tokensFor(candidateCount));
+      rawMeals = await generateRecipes(candidateCount, prefsStr, likedCtx);
     } catch {
       rawMeals = [...FALLBACK_MEALS].sort(() => Math.random() - 0.5);
       usedFallback = true;
@@ -716,11 +772,9 @@ export default function App() {
       try {
         const already = candidates.map(m => m.name).join(", ");
         setLoadingMsg("Pochi video trovati: cerco piatti più classici...");
-        const extraRaw = await callClaudeAPI(
-          `Genera 6 ricette per pranzo da preparare in anticipo, diverse da queste: ${already}.` +
-          `${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}` +
-          ` Scegli SOLO piatti classici e molto conosciuti della cucina italiana e mediterranea, con il nome esatto con cui sono noti.`,
-          tokensFor(6)
+        const extraRaw = await generateRecipes(6, prefsStr, "",
+          ` Evita questi piatti gia' proposti: ${already}.` +
+          ` Scegli SOLO piatti classici e molto conosciuti della cucina italiana e mediterranea, con il nome esatto con cui sono noti.`
         );
         const extra = await resolveVideos(assignVisuals(extraRaw), 3);
         candidates = [...candidates, ...extra];

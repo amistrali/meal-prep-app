@@ -1,4 +1,8 @@
-﻿export default async function handler(req, res) {
+﻿// Un blocco da 2 ricette impiega circa 40 secondi: il margine serve perche' la
+// funzione non venga interrotta a meta' generazione.
+export const maxDuration = 60;
+
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
