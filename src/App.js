@@ -104,7 +104,7 @@ async function fbLoad(uid) {
 
 // ── API ────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei un nutrizionista esperto in meal prep per pranzi di ufficio.
-Genera esattamente 5 ricette COMPLETAMENTE DIVERSE tra loro per una settimana lavorativa.
+Genera il numero di ricette che ti chiede l'utente, COMPLETAMENTE DIVERSE tra loro, per i pranzi di una settimana lavorativa.
 
 REGOLE DI VARIETÀ (obbligatorie):
 - Ogni ricetta deve avere un INGREDIENTE PROTEICO DIVERSO: es. pollo, tonno, salmone, legumi, uova, tofu, manzo, gamberetti, sgombro, tacchino, ceci, lenticchie, feta, mozzarella...
@@ -113,15 +113,21 @@ REGOLE DI VARIETÀ (obbligatorie):
 - Evita assolutamente di ripetere lo stesso ingrediente principale in due ricette diverse
 - NON generare sempre bowl, wrap e insalate — varia il formato: zuppe fredde, frittate, tartine, poke, burritos, shakshuka fredda, pasta fredda, couscous, tabbouleh, niçoise, banh mi integrale...
 
+NOMI DEI PIATTI (regola critica):
+- Usa il nome con cui il piatto è REALMENTE conosciuto, come lo titolerebbe un canale di cucina italiano: "Parmigiana di melanzane", "Polpette di lenticchie al forno", "Insalata di farro con pollo e zucchine", "Cous cous alla trapanese", "Shakshuka", "Frittata di zucchine al forno".
+- VIETATI i nomi inventati in stile marketing ("Bowl Energetico Detox", "Power Quinoa Mix", "Vitality Bowl"): non corrispondono a nessuna ricetta esistente e rendono impossibile trovare un video di preparazione.
+- Il nome deve contenere l'ingrediente che caratterizza il piatto, non solo la base. "Pasta al forno" è troppo generico: scrivi "Pasta al forno con ricotta e spinaci".
+- A parità di tutto il resto, preferisci piatti classici e diffusi della cucina italiana e mediterranea: sono quelli per cui esiste un buon video di preparazione.
+
 Ogni ricetta: preparabile in anticipo, conservabile 3-4 giorni in frigo, max 30 min di prep, equilibrata (proteine + carboidrati complessi + grassi buoni + verdure), trasportabile in contenitore.
-Le 5 devono coprire categorie diverse: almeno una a base di cereali integrali, una di legumi, una di pesce, una di carne magra o uova, una vegana o vegetariana.
+Le ricette devono coprire categorie diverse: almeno una a base di cereali integrali, una di legumi, una di pesce, una di carne magra o uova, una vegana o vegetariana.
 
 IMPORTANTE: Rispondi ESCLUSIVAMENTE con un array JSON valido, nessun testo prima o dopo, nessun markdown.
 Ogni elemento:
 {"name":"string","kcal":number,"prep":number,"tags":["string"],
 "imageQuery":"query in inglese specifica per trovare una foto del piatto finito (es: 'salmon poke bowl avocado rice', 'shakshuka eggs tomato', 'chicken shawarma wrap')",
 "recipeUrl":"URL di una ricetta italiana autentica su giallozafferano.it, cucchiaio.it, fattoincasadabenedetta.it — lascia stringa vuota se non sei sicuro al 100%",
-"videoQuery":"query YouTube in italiano specifica per trovare un video di preparazione (es: 'poke bowl salmone ricetta facile')",
+"videoQuery":"come cercheresti su YouTube il video di preparazione di QUESTO piatto: nome reale del piatto in italiano seguito da 'ricetta' (es: 'parmigiana di melanzane ricetta')",
 "ingredients":[{"name":"string","qty":number,"unit":"string"}],
 "steps":[
   "PREPARAZIONE: descrizione dettagliata del passaggio con temperatura, tempi precisi, consistenza attesa, consigli visivi (es. 'rosola il pollo a fuoco medio-alto per 6-7 minuti per lato finché non è dorato e non rilascia più liquido rosa')",
@@ -175,6 +181,90 @@ async function callClaudeAPI(userMsg) {
     throw new Error("Formato risposta non valido");
   }
   return parsed;
+}
+
+// ── VIDEO ──────────────────────────────────────────────────────────────────
+// Chiede a /api/video di trovare un video YouTube davvero pertinente per ogni
+// piatto. L'endpoint restituisce null quando nessun candidato supera la soglia
+// di pertinenza: meglio nessun video che un video sbagliato.
+async function resolveVideos(meals, effort) {
+  if (!meals || meals.length === 0) return meals;
+  try {
+    const r = await fetch("/api/video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        effort,
+        dishes: meals.map((m, i) => ({
+          key: String(i),
+          name: m.name,
+          ingredients: m.ingredients,
+          videoQuery: m.videoQuery,
+        })),
+      }),
+    });
+    if (!r.ok) return meals.map(m => ({ ...m, video: null }));
+    const data = await r.json();
+    const res = data.results || {};
+    return meals.map((m, i) => ({ ...m, video: res[String(i)] || null }));
+  } catch {
+    return meals.map(m => ({ ...m, video: null }));
+  }
+}
+
+// Ingrediente caratterizzante, usato per non mettere in tavola cinque piatti
+// che girano tutti attorno allo stesso alimento.
+const KEY_ING = [
+  "pollo","tacchino","manzo","vitello","maiale","salsiccia","prosciutto",
+  "salmone","tonno","merluzzo","baccala","gamberi","polpo","calamari","cozze",
+  "uova","frittata","tofu","tempeh","seitan","ceci","lenticchie","fagioli","piselli",
+  "melanzane","zucchine","zucca","broccoli","cavolfiore","spinaci","funghi",
+  "peperoni","carciofi","asparagi","cavolo","ricotta","mozzarella","feta",
+  "parmigiano","burrata","gorgonzola"
+];
+
+function normTxt(s) {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function fmtDur(sec) {
+  if (!sec) return "";
+  const m = Math.floor(sec / 60), r = sec % 60;
+  return m > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`;
+}
+
+function primaryKey(meal) {
+  const hay = " " + normTxt(meal.name) + " " + (meal.ingredients || []).map(i => normTxt(i.name)).join(" ") + " ";
+  const found = KEY_ING.find(k => hay.includes(" " + k) || hay.includes(k + " "));
+  return found || normTxt((meal.ingredients || [])[0]?.name || "");
+}
+
+// Sceglie n piatti dando priorità a quelli con video verificato.
+// level 1-2: la varietà resta un vincolo, un piatto senza video entra pur di
+// non ripetere l'ingrediente. level 3: il video vince anche sulla varietà.
+function selectMeals(candidates, n, level) {
+  const withVideo = candidates.filter(m => m.video).sort((a, b) => (b.video.score || 0) - (a.video.score || 0));
+  const withoutVideo = candidates.filter(m => !m.video);
+  const out = [];
+  const used = new Set();
+
+  const take = (list, respectVariety) => {
+    for (const m of list) {
+      if (out.length >= n) return;
+      if (out.includes(m)) continue;
+      const k = primaryKey(m);
+      if (respectVariety && k && used.has(k)) continue;
+      out.push(m);
+      if (k) used.add(k);
+    }
+  };
+
+  take(withVideo, true);
+  if (level < 3) take(withoutVideo, true);
+  take(withVideo, false);
+  take(withoutVideo, false);
+  return out.slice(0, n);
 }
 
 // ── APP ────────────────────────────────────────────────────────────────────
@@ -577,10 +667,20 @@ export default function App() {
   }, [persist]);
 
   // ── GENERATE ──────────────────────────────────────────────────────────────
-  const generateWeek = async (tab) => {
+  // La priorità ai piatti con video parte già alta (livello 1 = FORTE) e sale
+  // ad ogni rigenerazione: più candidati, ricerca video più insistente e, al
+  // livello 3, il video conta più della varietà.
+  const generateWeek = async (tab, levelOverride) => {
+    const key = weekKey(tab);
+    const prevLevel = weeks[key]?.videoPriority || 0;
+    const level = levelOverride ?? Math.min(3, prevLevel + 1);
+    const candidateCount = level === 1 ? 8 : level === 2 ? 11 : 14;
+
     setLoading(true);
     setApiError("");
-    setLoadingMsg("Sto generando 5 ricette uniche per la tua settimana...");
+    setLoadingMsg(level === 1
+      ? "Genero le ricette e cerco i video di preparazione..."
+      : `Rigenero con priorità video ${level}/3 — cerco più a fondo...`);
 
     const likedNames = archive.flatMap(a =>
       (a.likedIds || []).map(id => a.meals?.find(m => m.id === id)?.name).filter(Boolean)
@@ -588,9 +688,8 @@ export default function App() {
     const likedCtx = likedNames.length > 0
       ? ` L'utente apprezza: ${likedNames.slice(0, 8).join(", ")}. Ispirati a questi gusti.`
       : "";
-    // Usa activePrefs (quelle selezionate e persistenti)
     const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
-    const userMsg = `Genera 5 ricette diverse per pranzo da preparare in anticipo.${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}${likedCtx} Le 5 ricette devono essere completamente diverse tra loro per ingrediente principale.`;
+    const userMsg = `Genera ${candidateCount} ricette diverse per pranzo da preparare in anticipo.${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}${likedCtx} Devono essere completamente diverse tra loro per ingrediente principale.`;
 
     let rawMeals;
     let usedFallback = false;
@@ -602,21 +701,50 @@ export default function App() {
       usedFallback = true;
     }
 
-    const meals = assignVisuals(rawMeals.slice(0, 5));
-    const plan = Object.fromEntries(DAYS.map((d, i) => [d, { ...meals[i], servings: 1 }]));
-    const key = weekKey(tab);
+    setLoadingMsg("Cerco su YouTube un video pertinente per ogni ricetta...");
+    let candidates = await resolveVideos(assignVisuals(rawMeals), level);
 
-    const newWeeks = { ...weeks, [key]: { plan, locked: false, lockedList: null, meals } };
+    // Dal livello 2 in su, se i video scarseggiano faccio un secondo giro
+    // chiedendo esplicitamente piatti classici, quelli che un video ce l'hanno.
+    if (!usedFallback && level >= 2 && candidates.filter(m => m.video).length < 5) {
+      try {
+        const already = candidates.map(m => m.name).join(", ");
+        setLoadingMsg("Pochi video trovati: cerco piatti più classici...");
+        const extraRaw = await callClaudeAPI(
+          `Genera 6 ricette per pranzo da preparare in anticipo, diverse da queste: ${already}.` +
+          `${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}` +
+          ` Scegli SOLO piatti classici e molto conosciuti della cucina italiana e mediterranea, con il nome esatto con cui sono noti.`
+        );
+        const extra = await resolveVideos(assignVisuals(extraRaw), 3);
+        candidates = [...candidates, ...extra];
+      } catch { /* il primo giro basta */ }
+    }
+
+    const chosen = selectMeals(candidates, 5, level).map((m, i) => ({
+      ...m, color: COLORS[i % COLORS.length], emoji: EMOJIS[i % EMOJIS.length]
+    }));
+    const meals = chosen.length >= 5 ? chosen : assignVisuals(candidates.slice(0, 5));
+    const plan = Object.fromEntries(DAYS.map((d, i) => [d, meals[i] ? { ...meals[i], servings: 1 } : null]));
+
+    const newWeeks = {
+      ...weeks,
+      [key]: { plan, locked: false, lockedList: null, meals: candidates, videoPriority: level }
+    };
     updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
 
     setLoading(false);
     setLoadingMsg("");
 
+    const withVideo = meals.filter(m => m.video).length;
     if (usedFallback) {
       setApiError("⚠️ API non raggiungibile: ho caricato ricette di esempio. Verifica che il file api/claude.js sia presente e che la variabile ANTHROPIC_KEY sia impostata su Vercel.");
       notify("📋 Piano caricato con ricette di esempio");
+    } else if (withVideo === 5) {
+      notify("✨ Piano generato — tutte e 5 le ricette hanno un video verificato!");
+    } else if (level < 3) {
+      notify(`✨ Piano generato — ${withVideo}/5 con video. Rigenera per insistere di più sui video.`);
     } else {
-      notify("✨ Piano generato con 5 ricette uniche!");
+      notify(`✨ Piano generato — ${withVideo}/5 con video (priorità già al massimo).`);
     }
   };
 
@@ -628,7 +756,10 @@ export default function App() {
     const spare = (wd.meals || []).filter(m => m.id && !inPlan.includes(m.id));
 
     if (spare.length > 0) {
-      const pick = spare[Math.floor(Math.random() * spare.length)];
+      // Fra le riserve, quelle con video verificato hanno la precedenza.
+      const spareWithVideo = spare.filter(m => m.video);
+      const pool = spareWithVideo.length > 0 ? spareWithVideo : spare;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
       const newPlan = { ...wd.plan, [day]: { ...pick, servings: 1 } };
       const key = weekKey(tab);
       const newWeeks = { ...weeks, [key]: { ...wd, plan: newPlan } };
@@ -642,7 +773,8 @@ export default function App() {
     try {
       const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
       const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo, diversa da: ${currentNames}.${prefsStr ? " Preferenze: " + prefsStr : ""} Rispondi con array JSON di 1 elemento.`);
-      const meal = assignVisuals([parsed[0]])[0];
+      setLoadingMsg("Cerco il video di preparazione...");
+      const meal = (await resolveVideos(assignVisuals([parsed[0]]), 3))[0];
       const newMeals = [...(wd.meals || []), meal];
       const newPlan = { ...wd.plan, [day]: { ...meal, servings: 1 } };
       const key = weekKey(tab);
@@ -723,6 +855,9 @@ export default function App() {
   const plannedCount = DAYS.filter(d => plan[d]).length;
   const activeSl = sl.filter(i => checkedSl[i.name] !== false);
   const hasData = DAYS.some(d => plan[d]);
+  // Livello di priorità video che verrà usato alla prossima generazione (1..3).
+  const nextVideoLevel = Math.min(3, (wd.videoPriority || 0) + 1);
+  const videoCount = DAYS.filter(d => plan[d]?.video).length;
   const wLabel = (t) => `${t === "current" ? "Sett. corrente" : "Sett. successiva"} (W${weekKey(t).split("-W")[1]})`;
 
   // Reset checkedSl to all-checked whenever shopping list content changes
@@ -831,11 +966,22 @@ export default function App() {
           <div>
             {locked && <div style={{ background:"#E8F5EE", border:"1.5px solid #A8C4B4", borderRadius:10, padding:"9px 14px", fontSize:12, color:"#4A7A6A", marginBottom:12 }}>🔒 Settimana bloccata — ricette fisse. Clicca "Sblocca" per modificare.</div>}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
-              <span style={{ color:"#6B5D4F", fontSize:12 }}>{plannedCount}/5 giorni pianificati</span>
+              <span style={{ color:"#6B5D4F", fontSize:12 }}>
+                {plannedCount}/5 giorni pianificati
+                {hasData && <span style={{ color: videoCount === 5 ? "#4A7A6A" : "#9A8A72", marginLeft:8 }}>▶️ {videoCount}/5 con video</span>}
+              </span>
               {!locked && (
                 <div style={{ display:"flex", gap:6 }}>
                   <button onClick={() => setShowPrefs(!showPrefs)} style={{ padding:"6px 12px", borderRadius:40, border: activePrefs.length > 0 ? "1.5px solid #4A7A6A" : "1.5px solid #C8BBA8", background: activePrefs.length > 0 ? "#E8F5EE" : "transparent", color: activePrefs.length > 0 ? "#4A7A6A" : "#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>⚙️ Preferenze{activePrefs.length > 0 ? ` (${activePrefs.length})` : ""}</button>
-                  <button onClick={() => generateWeek(activeTab)} style={{ padding:"6px 16px", borderRadius:40, border:"none", background:"#D4A96A", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", boxShadow:"0 2px 8px rgba(212,169,106,.35)" }}>✨ Genera ricette</button>
+                  <button onClick={() => generateWeek(activeTab)}
+                    title={hasData
+                      ? `Ogni rigenerazione alza la priorità ai piatti con video (prossimo livello: ${nextVideoLevel}/3)`
+                      : "Genera 5 ricette cercando per ognuna un video di preparazione pertinente"}
+                    style={{ padding:"6px 16px", borderRadius:40, border:"none", background:"#D4A96A", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", boxShadow:"0 2px 8px rgba(212,169,106,.35)" }}>
+                    {hasData
+                      ? `🔁 Rigenera · video ${"●".repeat(nextVideoLevel)}${"○".repeat(3 - nextVideoLevel)}`
+                      : "✨ Genera ricette"}
+                  </button>
                 </div>
               )}
             </div>
@@ -966,7 +1112,8 @@ export default function App() {
                               setLoading(true); setLoadingMsg("Genero una ricetta per " + day + "...");
                               try {
                                 const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (activePrefs.length > 0 ? " Preferenze: " + activePrefs.join(", ") : "") + " Rispondi con array JSON di 1 elemento.");
-                                const meal = assignVisuals([parsed[0]])[0];
+                                setLoadingMsg("Cerco il video di preparazione...");
+                                const meal = (await resolveVideos(assignVisuals([parsed[0]]), 3))[0];
                                 const newMeals = [...(wd.meals || []), meal];
                                 const newPlan = { ...plan, [day]: { ...meal, servings: 1 } };
                                 const key = weekKey(activeTab);
@@ -1016,20 +1163,50 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  {/* Link ricetta e video */}
-                  {(showRecipe.recipeUrl || showRecipe.videoQuery) && (
-                    <div style={{ display:"flex", gap:8, padding:"12px 20px", borderBottom:"1.5px solid #EDE6D6", flexWrap:"wrap" }}>
-                      {showRecipe.recipeUrl && (
-                        <a href={showRecipe.recipeUrl} target="_blank" rel="noreferrer"
-                          style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:20, background:"#FFF8EC", border:"1.5px solid #EDD4A0", color:"#8A6A2A", fontSize:12, textDecoration:"none", fontFamily:"Georgia,serif" }}>
-                          📖 Ricetta originale
-                        </a>
-                      )}
-                      {showRecipe.videoQuery && (
-                        <a href={"https://www.youtube.com/results?search_query="+encodeURIComponent(showRecipe.videoQuery)} target="_blank" rel="noreferrer"
-                          style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:20, background:"#FFF0F0", border:"1.5px solid #F0C4C4", color:"#C47A7A", fontSize:12, textDecoration:"none", fontFamily:"Georgia,serif" }}>
-                          ▶️ Video preparazione
-                        </a>
+                  {/* Ricetta originale e video di preparazione verificato */}
+                  {(showRecipe.recipeUrl || showRecipe.video || showRecipe.videoQuery) && (
+                    <div style={{ padding:"12px 20px", borderBottom:"1.5px solid #EDE6D6" }}>
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        {showRecipe.recipeUrl && (
+                          <a href={showRecipe.recipeUrl} target="_blank" rel="noreferrer"
+                            style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:20, background:"#FFF8EC", border:"1.5px solid #EDD4A0", color:"#8A6A2A", fontSize:12, textDecoration:"none", fontFamily:"Georgia,serif" }}>
+                            📖 Ricetta originale
+                          </a>
+                        )}
+                        {!showRecipe.video && showRecipe.videoQuery && (
+                          <a href={"https://www.youtube.com/results?search_query="+encodeURIComponent(showRecipe.videoQuery)} target="_blank" rel="noreferrer"
+                            title="Per questo piatto non ho trovato un video abbastanza pertinente: qui cerchi tu su YouTube"
+                            style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:20, background:"#F5F2EC", border:"1.5px solid #DDD3C2", color:"#8A7A66", fontSize:12, textDecoration:"none", fontFamily:"Georgia,serif" }}>
+                            🔎 Cerca un video su YouTube
+                          </a>
+                        )}
+                      </div>
+
+                      {showRecipe.video && (
+                        <div style={{ marginTop:12 }}>
+                          <div style={{ position:"relative", width:"100%", paddingTop:"56.25%", borderRadius:12, overflow:"hidden", background:"#000" }}>
+                            <iframe
+                              src={"https://www.youtube-nocookie.com/embed/" + showRecipe.video.id}
+                              title={showRecipe.video.title}
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                              style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%", border:0 }}
+                            />
+                          </div>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, marginTop:8, flexWrap:"wrap" }}>
+                            <div style={{ minWidth:0, flex:1 }}>
+                              <div style={{ fontSize:13, color:"#2C2C2C", lineHeight:1.35 }}>{showRecipe.video.title}</div>
+                              <div style={{ fontSize:11, color:"#9A8A72", marginTop:2 }}>
+                                {showRecipe.video.channel}
+                                {showRecipe.video.durationSec ? " · " + fmtDur(showRecipe.video.durationSec) : ""}
+                              </div>
+                            </div>
+                            <a href={showRecipe.video.url} target="_blank" rel="noreferrer"
+                              style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, background:"#FFF0F0", border:"1.5px solid #F0C4C4", color:"#C47A7A", fontSize:11, textDecoration:"none", fontFamily:"Georgia,serif" }}>
+                              Apri su YouTube ↗
+                            </a>
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}
@@ -1097,10 +1274,10 @@ export default function App() {
                           <MealImage query={meal.imageQuery} name={meal.name} style={{ width:"100%", height:"100%" }} />
                           <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 50%)" }} />
                           <div style={{ position:"absolute", bottom:6, left:10, fontSize:18 }}>{meal.emoji}</div>
-                          {(meal.recipeUrl || meal.videoQuery) && (
+                          {(meal.recipeUrl || meal.video) && (
                             <div style={{ position:"absolute", top:6, right:6, display:"flex", gap:4 }}>
                               {meal.recipeUrl && <span style={{ fontSize:11, background:"rgba(255,255,255,.85)", borderRadius:10, padding:"2px 6px" }}>📖</span>}
-                              {meal.videoQuery && <span style={{ fontSize:11, background:"rgba(255,255,255,.85)", borderRadius:10, padding:"2px 6px" }}>▶️</span>}
+                              {meal.video && <span title={meal.video.title} style={{ fontSize:11, background:"rgba(255,255,255,.85)", borderRadius:10, padding:"2px 6px" }}>▶️</span>}
                             </div>
                           )}
                         </div>
