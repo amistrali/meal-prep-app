@@ -139,13 +139,19 @@ Ogni elemento:
 "prepNotes":"nota sulla preparazione anticipata: cosa fare la domenica sera e cosa lasciare per il giorno stesso"}
 qty è sempre riferito a 1 porzione. Gli steps devono essere almeno 5 e massimo 8, ognuno di almeno 2 righe di testo dettagliato.`;
 
-async function callClaudeAPI(userMsg) {
+// Ogni ricetta costa circa 600 token in uscita: il tetto deve seguire il
+// numero di ricette chieste, altrimenti la risposta si tronca a meta' JSON.
+function tokensFor(count) {
+  return Math.min(16000, 900 * count + 600);
+}
+
+async function callClaudeAPI(userMsg, maxTokens = 4000) {
   const response = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 4000,
+      max_tokens: maxTokens,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMsg }],
     }),
@@ -674,7 +680,7 @@ export default function App() {
     const key = weekKey(tab);
     const prevLevel = weeks[key]?.videoPriority || 0;
     const level = levelOverride ?? Math.min(3, prevLevel + 1);
-    const candidateCount = level === 1 ? 8 : level === 2 ? 11 : 14;
+    const candidateCount = level === 1 ? 8 : level === 2 ? 11 : 12;
 
     setLoading(true);
     setApiError("");
@@ -695,7 +701,7 @@ export default function App() {
     let usedFallback = false;
 
     try {
-      rawMeals = await callClaudeAPI(userMsg);
+      rawMeals = await callClaudeAPI(userMsg, tokensFor(candidateCount));
     } catch {
       rawMeals = [...FALLBACK_MEALS].sort(() => Math.random() - 0.5);
       usedFallback = true;
@@ -713,7 +719,8 @@ export default function App() {
         const extraRaw = await callClaudeAPI(
           `Genera 6 ricette per pranzo da preparare in anticipo, diverse da queste: ${already}.` +
           `${prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : ""}` +
-          ` Scegli SOLO piatti classici e molto conosciuti della cucina italiana e mediterranea, con il nome esatto con cui sono noti.`
+          ` Scegli SOLO piatti classici e molto conosciuti della cucina italiana e mediterranea, con il nome esatto con cui sono noti.`,
+          tokensFor(6)
         );
         const extra = await resolveVideos(assignVisuals(extraRaw), 3);
         candidates = [...candidates, ...extra];

@@ -224,7 +224,9 @@ async function resolveDish(key, dish, effort) {
   const dishIng = ingredientsOf(dish);
   let best = null;
 
+  let queriesUsed = 0;
   for (const q of buildQueries(dish, effort)) {
+    queriesUsed++;
     let candidates;
     try {
       candidates = await ytSearch(key, q);
@@ -242,8 +244,10 @@ async function resolveDish(key, dish, effort) {
       const { score } = scoreVideo(dish, enriched, dishIng);
       if (!best || score > best.score) best = { ...enriched, score };
     }
-    // Se abbiamo gia' un ottimo match non spendiamo altra quota.
-    if (best && best.score >= 75) break;
+    // Risparmio di quota: se il match e' gia' ottimo ci fermiamo subito, e in
+    // ogni caso non spendiamo una terza ricerca quando ne abbiamo gia' uno valido.
+    if (best && best.score >= 70) break;
+    if (best && best.score >= MIN_SCORE && queriesUsed >= 2) break;
   }
 
   const value = best && best.score >= MIN_SCORE
