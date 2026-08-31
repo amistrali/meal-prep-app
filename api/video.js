@@ -142,11 +142,14 @@ function scoreVideo(dish, video, dishIng) {
   const titleN = norm(video.title);
   if (/\b(ricetta|ricette|come fare|come preparare|preparazione|passo passo)\b/.test(titleN)) score += 8;
 
-  // 3b. Video legati a un elettrodomestico specifico: utili solo a chi ce l'ha.
-  //     Penalizzati quanto basta per farsi superare da un'alternativa generica,
-  //     non tanto da sparire se sono l'unica cosa pertinente.
-  const appliance = /\b(bimby|thermomix|tm5|tm6|tm31|tm21|monsieur cuisine|cuisine companion|friggitrice ad aria|airfryer)\b/;
-  if (appliance.test(titleN) && !appliance.test(norm(dish.name))) score -= 18;
+  // 3b. Robot da cucina proprietari: la preparazione mostrata non e' replicabile
+  //     senza quella macchina, quindi il video viene scartato del tutto. La
+  //     ricetta resta, semplicemente senza video. La friggitrice ad aria non
+  //     rientra qui: e' un elettrodomestico diffuso e la ricetta resta leggibile.
+  const robot = /\b(bimby|thermomix|tm5|tm6|tm31|tm21|monsieur cuisine|cuisine companion|kenwood cooking|magic cooker)\b/;
+  if (robot.test(titleN) && !robot.test(norm(dish.name))) {
+    return { score: 0, coverage };
+  }
 
   // 4. Canale affidabile di cucina italiana.
   if (TRUSTED_CHANNELS.some(c => channel.includes(c))) score += 12;
