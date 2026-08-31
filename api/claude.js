@@ -6,7 +6,7 @@
   try {
     const body = {
       ...req.body,
-      max_tokens: 3000
+      max_tokens: req.body?.max_tokens || 4000
     };
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
