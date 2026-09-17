@@ -121,7 +121,11 @@ function scoreVideo(dish, video, dishIng) {
   // 1. Quanta parte del nome del piatto compare nel titolo del video.
   const matched = dishTokens.filter(t => tokenMatches(t, titleTokens));
   const coverage = dishTokens.length ? matched.length / dishTokens.length : 0;
-  if (coverage < 0.34) return { score: 0, coverage };
+  // 0.30 e non 0.34: un piatto dal nome lungo ("Shakshuka con peperoni e feta")
+  // contro un video intitolato col solo nome del piatto ("Shakshuka") si ferma
+  // a 0.33 e perdeva un video perfetto. A discriminare ci pensano comunque gli
+  // ingredienti caratterizzanti qui sotto.
+  if (coverage < 0.30) return { score: 0, coverage };
 
   let score = coverage * 55;
 
@@ -277,7 +281,7 @@ async function resolveDish(key, dish, effort) {
 }
 
 // ── HANDLER ─────────────────────────────────────────────────────────────────
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });

@@ -1,6 +1,6 @@
-﻿// Un blocco da 2 ricette impiega circa 40 secondi: il margine serve perche' la
-// funzione non venga interrotta a meta' generazione.
-export const maxDuration = 60;
+﻿// Una ricetta impiega circa 30 secondi. Il margine e' ampio di proposito:
+// una funzione interrotta a meta' generazione butta via la chiamata gia' pagata.
+export const maxDuration = 300;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {

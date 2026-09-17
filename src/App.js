@@ -161,21 +161,17 @@ const CATEGORIE = [
   "un piatto unico freddo da contenitore"
 ];
 
-// Genera `count` ricette con piu' chiamate parallele da 2.
-// Una sola chiamata da 8+ ricette supera il tetto di token e impiega oltre due
-// minuti: sul telefono il browser chiude la connessione prima della risposta.
-// Spezzata in blocchi paralleli, il tempo d'attesa e' quello del blocco piu'
-// lento e un blocco fallito non fa cadere l'intera generazione.
+// Genera `count` ricette con una chiamata parallela per ricetta.
+// Misurato: una ricetta costa ~1400 token e ~30 secondi. Chiederne 8 in una
+// volta sfora il tetto dei token e supera i due minuti, e sul telefono il
+// browser chiude la connessione prima della risposta. Una richiesta per
+// ricetta tiene ogni chiamata corta e lontana dai limiti della funzione, il
+// tempo d'attesa e' quello della singola piu' lenta, e una chiamata fallita
+// toglie un piatto invece di far cadere l'intera generazione.
 async function generateRecipes(count, prefsStr, likedCtx, extraIstruzioni = "") {
   const cats = [...CATEGORIE].sort(() => Math.random() - 0.5);
   const blocchi = [];
-  let c = 0;
-  for (let i = 0; i < count; i += 2) {
-    const n = Math.min(2, count - i);
-    const catBlocco = [];
-    for (let k = 0; k < n; k++) catBlocco.push(cats[c++ % cats.length]);
-    blocchi.push(catBlocco);
-  }
+  for (let i = 0; i < count; i++) blocchi.push([cats[i % cats.length]]);
 
   const esiti = await Promise.allSettled(blocchi.map((catBlocco, idx) => {
     const n = Math.max(1, catBlocco.length);
@@ -290,6 +286,32 @@ const KEY_ING = [
 function normTxt(s) {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// I preferiti sono indicizzati per NOME normalizzato, non per id: gli id sono
+// casuali ad ogni generazione, quindi lo stesso piatto rigenerato perderebbe il
+// cuore. Con la chiave sul nome un "mi piace" vale per sempre.
+const voteKey = (meal) => normTxt(meal?.name || "");
+
+function VoteButtons({ meal, vote, onVote, size = 17 }) {
+  if (!meal) return null;
+  const bottone = (attivo, titolo, contenuto, v) => (
+    <button
+      title={titolo}
+      onClick={(e) => { e.stopPropagation(); onVote(meal, v); }}
+      style={{ fontSize:size, background:"transparent", border:"none", cursor:"pointer",
+               padding:"2px 3px", borderRadius:8, lineHeight:1,
+               opacity: attivo ? 1 : 0.4, transition:"transform .15s, opacity .15s" }}
+      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.25)"; e.currentTarget.style.opacity = 1; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.opacity = attivo ? 1 : 0.4; }}
+    >{contenuto}</button>
+  );
+  return (
+    <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+      {bottone(vote === 1, vote === 1 ? "Togli dai preferiti" : "Mi piace — l'AI ne terrà conto", vote === 1 ? "❤️" : "🤍", 1)}
+      {bottone(vote === -1, vote === -1 ? "Togli il pollice giù" : "Non mi piace — l'AI eviterà piatti simili", "👎", -1)}
+    </div>
+  );
 }
 
 function fmtDur(sec) {
@@ -622,6 +644,8 @@ export default function App() {
   const [activePrefs, setActivePrefs] = useState([]); // quelle attualmente selezionate (attive)
   const [activeTab, setActiveTab] = useState("current");
   const [view, setView] = useState("planner");
+  // { "<nome normalizzato>": { vote: 1 | -1, meal: {...}, at } }
+  const [votes, setVotes] = useState({});
   const [showRecipe, setShowRecipe] = useState(null);
   const [notification, setNotification] = useState("");
   const [loading, setLoading] = useState(false);
@@ -653,6 +677,7 @@ export default function App() {
             if (data.archive) setArchive(data.archive);
             if (data.prefsHistory) setPrefsHistory(data.prefsHistory);
             if (data.activePrefs) setActivePrefs(data.activePrefs);
+            if (data.votes) setVotes(data.votes);
           }
           // Avvia listener real-time per sync multi-device
           unsubSnap = onSnapshot(
@@ -664,6 +689,7 @@ export default function App() {
                 if (d.archive) setArchive(d.archive);
                 if (d.prefsHistory) setPrefsHistory(d.prefsHistory);
                 if (d.activePrefs) setActivePrefs(d.activePrefs);
+                if (d.votes) setVotes(d.votes);
               }
               setReady(true); // pronto dopo primo snapshot
             },
@@ -682,6 +708,7 @@ export default function App() {
             if (d.archive) setArchive(d.archive);
             if (d.prefsHistory) setPrefsHistory(d.prefsHistory);
             if (d.activePrefs) setActivePrefs(d.activePrefs);
+            if (d.votes) setVotes(d.votes);
           }
         } catch {}
         setReady(true);
@@ -691,15 +718,16 @@ export default function App() {
     return () => { unsub(); if (unsubSnap) unsubSnap(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const persist = useCallback((newWeeks, newArchive, newPrefsHistory, newActivePrefs) => {
+  const persist = useCallback((newWeeks, newArchive, newPrefsHistory, newActivePrefs, newVotes) => {
     const data = {
       weeks: newWeeks,
       archive: newArchive,
       prefsHistory: newPrefsHistory ?? prefsHistory,
       activePrefs: newActivePrefs ?? activePrefs,
+      votes: newVotes ?? votes,
     };
     fbSave(user?.uid || null, data);
-  }, [user, prefsHistory, activePrefs]);
+  }, [user, prefsHistory, activePrefs, votes]);
 
   const notify = (msg) => { setNotification(msg); setTimeout(() => setNotification(""), 3000); };
 
@@ -730,6 +758,66 @@ export default function App() {
     return newArchive;
   }, [persist]);
 
+  // ── PREFERITI ─────────────────────────────────────────────────────────────
+  const voteOf = (meal) => votes[voteKey(meal)]?.vote || 0;
+
+  const toggleVote = (meal, v) => {
+    const k = voteKey(meal);
+    if (!k) return;
+    const attuale = votes[k]?.vote || 0;
+    const nuovi = { ...votes };
+    if (attuale === v) {
+      delete nuovi[k];
+    } else {
+      // Salvo la ricetta intera, non solo il nome: serve per riproporla
+      // tale e quale senza rigenerarla (e senza spendere token).
+      const { servings, ...pulita } = meal;
+      nuovi[k] = { vote: v, meal: pulita, at: Date.now() };
+    }
+    setVotes(nuovi);
+    persist(weeks, archive, prefsHistory, activePrefs, nuovi);
+    notify(attuale === v ? "Preferenza rimossa."
+      : v === 1 ? "❤️ Aggiunto ai preferiti"
+      : "👎 L'AI eviterà piatti simili");
+  };
+
+  // I cuori messi prima di questa versione vivevano dentro la settimana
+  // archiviata (likedIds). Continuano a valere: qui le due fonti si uniscono.
+  const contaPreferitiSettimana = (aw) => DAYS.filter(d => {
+    const m = aw.plan?.[d];
+    return m && (voteOf(m) === 1 || (aw.likedIds || []).includes(m.id));
+  }).length;
+
+  const preferiti = Object.values(votes).filter(v => v.vote === 1).sort((a, b) => (b.at || 0) - (a.at || 0));
+  const scartati = Object.values(votes).filter(v => v.vote === -1).sort((a, b) => (b.at || 0) - (a.at || 0));
+
+  // Contesto sui gusti, usato da tutte le generazioni. I "non mi piace" contano
+  // quanto i "mi piace": sapere cosa evitare restringe il campo piu' in fretta.
+  const buildGustiCtx = () => {
+    const piaciuti = [
+      ...preferiti.map(v => v.meal?.name),
+      ...archive.flatMap(a => (a.likedIds || []).map(id => a.meals?.find(m => m.id === id)?.name))
+    ].filter(Boolean);
+    const evitati = scartati.map(v => v.meal?.name).filter(Boolean);
+    return (
+      (piaciuti.length > 0 ? ` L'utente apprezza: ${[...new Set(piaciuti)].slice(0, 8).join(", ")}. Ispirati a questi gusti.` : "") +
+      (evitati.length > 0 ? ` L'utente NON gradisce: ${[...new Set(evitati)].slice(0, 8).join(", ")}. Non riproporli e evita preparazioni troppo simili.` : "")
+    );
+  };
+
+  // Mette un preferito direttamente in un giorno, senza chiamare l'AI.
+  const assegnaPreferito = (meal, day) => {
+    const wd = getWD(activeTab);
+    if (wd.locked) { notify("🔒 Sblocca prima di modificare."); return; }
+    const key = weekKey(activeTab);
+    const copia = { ...meal, id: Date.now() + Math.random(), servings: 1 };
+    const nuovoPiano = { ...wd.plan, [day]: copia };
+    const nuoviMeals = [...(wd.meals || []), copia];
+    updateWeeks({ ...weeks, [key]: { ...wd, plan: nuovoPiano, meals: nuoviMeals } }, archive, prefsHistory, activePrefs);
+    notify(`${meal.name} → ${day}`);
+    setView("planner");
+  };
+
   // ── GENERATE ──────────────────────────────────────────────────────────────
   // La priorità ai piatti con video parte già alta (livello 1 = FORTE) e sale
   // ad ogni rigenerazione: più candidati, ricerca video più insistente e, al
@@ -746,12 +834,7 @@ export default function App() {
       ? `Genero ${candidateCount} ricette in parallelo (circa un minuto)...`
       : `Rigenero con priorità video ${level}/3 — ${candidateCount} ricette, cerco più a fondo...`);
 
-    const likedNames = archive.flatMap(a =>
-      (a.likedIds || []).map(id => a.meals?.find(m => m.id === id)?.name).filter(Boolean)
-    );
-    const likedCtx = likedNames.length > 0
-      ? ` L'utente apprezza: ${likedNames.slice(0, 8).join(", ")}. Ispirati a questi gusti.`
-      : "";
+    const likedCtx = buildGustiCtx();
     const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
     let rawMeals;
     let usedFallback = false;
@@ -833,7 +916,7 @@ export default function App() {
     const currentNames = DAYS.map(d => wd.plan[d]?.name).filter(Boolean).join(", ");
     try {
       const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
-      const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo, diversa da: ${currentNames}.${prefsStr ? " Preferenze: " + prefsStr : ""} Rispondi con array JSON di 1 elemento.`);
+      const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo, diversa da: ${currentNames}.${prefsStr ? " Preferenze: " + prefsStr : ""}${buildGustiCtx()} Rispondi con array JSON di 1 elemento.`);
       setLoadingMsg("Cerco il video di preparazione...");
       const meal = (await resolveVideos(assignVisuals([parsed[0]]), 3))[0];
       const newMeals = [...(wd.meals || []), meal];
@@ -897,15 +980,6 @@ export default function App() {
     notify("📦 Settimana archiviata!");
   };
 
-  const toggleLike = (wk, mealId) => {
-    const newArchive = archive.map(a => {
-      if (a.weekKey !== wk) return a;
-      const liked = a.likedIds || [];
-      return { ...a, likedIds: liked.includes(mealId) ? liked.filter(id => id !== mealId) : [...liked, mealId] };
-    });
-    setArchive(newArchive);
-    persist(weeks, newArchive, prefsHistory, activePrefs);
-  };
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   // Compute sl here so useEffect can use it (hooks must be before early returns)
@@ -981,9 +1055,9 @@ export default function App() {
           <h1 style={{ margin:0, fontSize:24, fontWeight:400, color:"#2C2C2C", lineHeight:1.2 }}>I tuoi pranzi <span style={{ fontStyle:"italic", color:"#7BAF8E" }}>settimanali</span></h1>
         </div>
         <div style={{ display:"flex", gap:5, flexWrap:"wrap", paddingTop:4, alignItems:"center" }}>
-          {["planner","ricette","spesa","archivio"].map(v => (
+          {["planner","ricette","preferiti","spesa","archivio"].map(v => (
             <button key={v} onClick={() => { setView(v); setShowRecipe(null); setArchiveDetail(null); }} style={{ padding:"7px 14px", borderRadius:40, border:view===v?"none":"1.5px solid #C8BBA8", background:view===v?"#2C2C2C":"transparent", color:view===v?"#F5F0E8":"#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>
-              {v==="planner"?"📅 Planner":v==="ricette"?"📋 Ricette":v==="spesa"?"🛒 Spesa":"📦 Archivio"}
+              {v==="planner"?"📅 Planner":v==="ricette"?"📋 Ricette":v==="preferiti"?`❤️ Preferiti${preferiti.length?" ("+preferiti.length+")":""}`:v==="spesa"?"🛒 Spesa":"📦 Archivio"}
             </button>
           ))}
           {/* User avatar + logout */}
@@ -1158,6 +1232,7 @@ export default function App() {
                             <span style={{ fontSize:11, color:"#2C2C2C", minWidth:14, textAlign:"center" }}>{meal.servings||1}</span>
                             <button onClick={() => setServings(activeTab, day, (meal.servings||1)+1)} disabled={locked} style={{ width:20, height:20, borderRadius:"50%", border:"none", background:locked?"transparent":"#E8E0D0", color:"#6B5D4F", cursor:locked?"default":"pointer", fontSize:13, padding:0, lineHeight:1 }}>+</button>
                           </div>
+                          <VoteButtons meal={meal} vote={voteOf(meal)} onVote={toggleVote} size={16} />
                           <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                             <button onClick={() => { setShowRecipe(meal); setView("ricette"); }} style={{ padding:"4px 9px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer" }}>Ricetta</button>
                             {!locked && <button onClick={() => swapMeal(activeTab, day)} style={{ padding:"4px 8px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#5A8A70", fontSize:12, cursor:"pointer" }}>🔄</button>}
@@ -1167,12 +1242,18 @@ export default function App() {
                       ) : (
                         <div style={{ flex:1, display:"flex", alignItems:"center", gap:10 }}>
                           <div style={{ flex:1, height:38, borderRadius:9, border:"1.5px dashed #C8BBA8", display:"flex", alignItems:"center", paddingLeft:12, color:"#B0A090", fontSize:12 }}>Nessun pasto assegnato</div>
+                          {!locked && preferiti.length > 0 && (
+                            <button onClick={() => setView("preferiti")} title="Scegli da un piatto che hai già messo tra i preferiti — nessuna generazione, nessun costo"
+                              style={{ padding:"5px 11px", borderRadius:20, border:"1.5px solid #EDD4A0", background:"#FFF8EC", color:"#8A6A2A", fontSize:11, cursor:"pointer", fontFamily:"Georgia,serif", whiteSpace:"nowrap" }}>
+                              ❤️ Preferiti
+                            </button>
+                          )}
                           {!locked && (
                             <button onClick={async () => {
                               const currentNames = DAYS.map(d => plan[d]?.name).filter(Boolean).join(", ");
                               setLoading(true); setLoadingMsg("Genero una ricetta per " + day + "...");
                               try {
-                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (activePrefs.length > 0 ? " Preferenze: " + activePrefs.join(", ") : "") + " Rispondi con array JSON di 1 elemento.");
+                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (activePrefs.length > 0 ? " Preferenze: " + activePrefs.join(", ") : "") + buildGustiCtx() + " Rispondi con array JSON di 1 elemento.");
                                 setLoadingMsg("Cerco il video di preparazione...");
                                 const meal = (await resolveVideos(assignVisuals([parsed[0]]), 3))[0];
                                 const newMeals = [...(wd.meals || []), meal];
@@ -1217,7 +1298,12 @@ export default function App() {
                     <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%)" }} />
                     <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"16px 20px" }}>
                       <div style={{ fontSize:28, marginBottom:4 }}>{showRecipe.emoji}</div>
-                      <h2 style={{ margin:"0 0 4px", fontSize:19, fontWeight:600, color:"#fff", textShadow:"0 1px 4px rgba(0,0,0,.4)" }}>{showRecipe.name}</h2>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <h2 style={{ margin:"0 0 4px", fontSize:19, fontWeight:600, color:"#fff", textShadow:"0 1px 4px rgba(0,0,0,.4)", flex:1, minWidth:0 }}>{showRecipe.name}</h2>
+                        <div style={{ background:"rgba(255,255,255,.9)", borderRadius:20, padding:"2px 4px", flexShrink:0 }}>
+                          <VoteButtons meal={showRecipe} vote={voteOf(showRecipe)} onVote={toggleVote} size={18} />
+                        </div>
+                      </div>
                       <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
                         <span style={{ fontSize:12, color:"rgba(255,255,255,.85)" }}>⏱ {showRecipe.prep} min</span>
                         <span style={{ fontSize:12, color:"rgba(255,255,255,.85)" }}>🔥 {showRecipe.kcal} kcal/porzione</span>
@@ -1362,6 +1448,70 @@ export default function App() {
         )}
 
         {/* ── SPESA ── */}
+        {/* ── PREFERITI ── */}
+        {view === "preferiti" && (
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+              <span style={{ color:"#6B5D4F", fontSize:12 }}>
+                {preferiti.length} preferiti{scartati.length > 0 ? ` · ${scartati.length} scartati` : ""} — l'AI ne tiene conto ad ogni generazione
+              </span>
+            </div>
+
+            {preferiti.length === 0 ? (
+              <div style={{ background:"#fff", borderRadius:18, padding:"36px 24px", textAlign:"center", border:"1.5px solid #EDE6D6" }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>🤍</div>
+                <p style={{ color:"#6B5D4F", fontSize:14, marginBottom:6 }}>Nessun piatto tra i preferiti.</p>
+                <p style={{ color:"#9A8A72", fontSize:12, margin:0 }}>
+                  Clicca il cuore su una ricetta — nel planner, nella scheda o in archivio.<br />
+                  Da qui potrai rimetterla in tavola senza rigenerarla.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
+                {preferiti.map(({ meal }) => (
+                  <div key={voteKey(meal)} style={{ display:"flex", alignItems:"center", gap:12, background:"#fff", borderRadius:14, padding:"12px 14px", border:"1.5px solid #EDE6D6", boxShadow:"0 2px 10px rgba(0,0,0,.05)" }}>
+                    <div style={{ width:48, height:48, borderRadius:10, flexShrink:0, overflow:"hidden" }}>
+                      <MealImage query={meal.imageQuery} name={meal.name} color={meal.color} emoji={meal.emoji} style={{ width:48, height:48 }} />
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:13, fontWeight:600, color:"#2C2C2C", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{meal.name}</div>
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:2 }}>
+                        <span style={{ fontSize:10, color:"#9A8A72" }}>⏱{meal.prep}min</span>
+                        <span style={{ fontSize:10, color:"#9A8A72" }}>🔥{meal.kcal}kcal</span>
+                        {meal.video && <span style={{ fontSize:10, color:"#C47A7A" }}>▶️ video</span>}
+                      </div>
+                    </div>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => { if (e.target.value) { assegnaPreferito(meal, e.target.value); e.target.value = ""; } }}
+                      title="Mettilo in un giorno della settimana, senza rigenerare nulla"
+                      style={{ padding:"5px 8px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#5A8A70", fontSize:11, cursor:"pointer", fontFamily:"Georgia,serif", flexShrink:0 }}>
+                      <option value="">↳ Metti in…</option>
+                      {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <button onClick={() => { setShowRecipe(meal); setView("ricette"); }} style={{ padding:"4px 9px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:11, cursor:"pointer", flexShrink:0 }}>Ricetta</button>
+                    <VoteButtons meal={meal} vote={voteOf(meal)} onVote={toggleVote} size={17} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {scartati.length > 0 && (
+              <div style={{ marginTop:22 }}>
+                <div style={{ fontSize:10, letterSpacing:3, color:"#9A8A72", textTransform:"uppercase", marginBottom:8 }}>Piatti che eviti</div>
+                <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
+                  {scartati.map(({ meal }) => (
+                    <span key={voteKey(meal)} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 10px", borderRadius:20, background:"#F5F2EC", border:"1.5px solid #DDD3C2", fontSize:11, color:"#8A7A66" }}>
+                      {meal.name}
+                      <button onClick={() => toggleVote(meal, -1)} title="Togli dagli scartati" style={{ background:"transparent", border:"none", cursor:"pointer", color:"#B0A090", fontSize:13, padding:0, lineHeight:1 }}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {view === "spesa" && (
           <div>
             {locked && <div style={{ background:"#E8F5EE", border:"1.5px solid #A8C4B4", borderRadius:10, padding:"9px 14px", fontSize:12, color:"#4A7A6A", marginBottom:12 }}>🔒 Lista bloccata — spunte e selezione fisse.</div>}
@@ -1487,7 +1637,6 @@ export default function App() {
                   <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                     {DAYS.map(day => {
                       const meal = aw.plan[day]; if (!meal) return null;
-                      const liked = (aw.likedIds||[]).includes(meal.id);
                       return (
                         <div key={day} style={{ display:"flex", alignItems:"center", gap:12, background:"#fff", borderRadius:12, padding:"11px 14px", border:"1.5px solid #EDE6D6" }}>
                           <div style={{ width:32, height:32, borderRadius:8, background:meal.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>{meal.emoji}</div>
@@ -1495,14 +1644,12 @@ export default function App() {
                             <div style={{ fontSize:12, fontWeight:600, color:"#2C2C2C", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{meal.name}</div>
                             <div style={{ fontSize:10, color:"#9A8A72" }}>{day} · {meal.kcal} kcal · {meal.prep}min</div>
                           </div>
-                          <button onClick={() => toggleLike(aw.weekKey, meal.id)} style={{ fontSize:19, background:"transparent", border:"none", cursor:"pointer", padding:"3px 6px", borderRadius:8, transition:"transform .15s" }} onMouseEnter={e=>e.currentTarget.style.transform="scale(1.25)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
-                            {liked ? "❤️" : "🤍"}
-                          </button>
+                          <VoteButtons meal={meal} vote={voteOf(meal)} onVote={toggleVote} size={19} />
                         </div>
                       );
                     })}
                   </div>
-                  {(aw.likedIds||[]).length > 0 && <div style={{ marginTop:14, padding:"11px 14px", background:"#FFF8EC", borderRadius:10, border:"1.5px solid #EDE6D6", fontSize:12, color:"#6B5D4F" }}>❤️ <strong>{aw.likedIds.length}</strong> ricette preferite — l'AI ne terrà conto per i piani futuri.</div>}
+                  {contaPreferitiSettimana(aw) > 0 && <div style={{ marginTop:14, padding:"11px 14px", background:"#FFF8EC", borderRadius:10, border:"1.5px solid #EDE6D6", fontSize:12, color:"#6B5D4F" }}>❤️ <strong>{contaPreferitiSettimana(aw)}</strong> ricette preferite — l'AI ne terrà conto per i piani futuri.</div>}
                 </div>
               );
             })() : (
@@ -1514,7 +1661,7 @@ export default function App() {
                     <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:4 }}>{aw.weekKey}</div>
                     <div style={{ fontSize:13, fontWeight:600, color:"#2C2C2C", marginBottom:6 }}>{DAYS.filter(d=>aw.plan[d]).length} pasti pianificati</div>
                     <div style={{ display:"flex", gap:3, marginBottom:8 }}>{DAYS.map(d=>aw.plan[d]?<span key={d} style={{fontSize:15}}>{aw.plan[d].emoji}</span>:null)}</div>
-                    <div style={{ fontSize:11, color:(aw.likedIds||[]).length>0?"#C4855A":"#B0A090" }}>{(aw.likedIds||[]).length>0?`❤️ ${aw.likedIds.length} preferite`:"Nessuna preferenza"}</div>
+                    <div style={{ fontSize:11, color:contaPreferitiSettimana(aw)>0?"#C4855A":"#B0A090" }}>{contaPreferitiSettimana(aw)>0?`❤️ ${contaPreferitiSettimana(aw)} preferite`:"Nessuna preferenza"}</div>
                   </div>
                 ))}
               </div>
