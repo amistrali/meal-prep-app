@@ -1625,7 +1625,19 @@ export default function App() {
           <div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
               <span style={{ color:"#6B5D4F", fontSize:12 }}>{archive.length} settimane · ❤️ per insegnare i tuoi gusti all'AI</span>
-              <button onClick={() => archiveWeek("current")} style={{ padding:"6px 13px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer" }}>+ Archivia sett. corrente</button>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                <button onClick={() => {
+                  // Per portare i dati nella versione su claude.ai (Archivio -> Importa).
+                  const blob = new Blob([JSON.stringify({ weeks, archive, votes, prefsHistory, activePrefs }, null, 1)], { type:"application/json" });
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(blob);
+                  a.download = "meal-prep-dati.json";
+                  a.click();
+                  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+                  notify("⬇ Dati esportati");
+                }} title="Scarica settimane, archivio, cuori e preferenze: si importano nella versione su claude.ai" style={{ padding:"6px 13px", borderRadius:20, border:"1.5px solid #A8C4B8", background:"transparent", color:"#4A7A6A", fontSize:12, cursor:"pointer" }}>⬇ Esporta dati</button>
+                <button onClick={() => archiveWeek("current")} style={{ padding:"6px 13px", borderRadius:20, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:12, cursor:"pointer" }}>+ Archivia sett. corrente</button>
+              </div>
             </div>
 
             {!archive.length ? (
