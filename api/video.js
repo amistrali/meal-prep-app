@@ -94,6 +94,19 @@ const TRUSTED_CHANNELS = [
   "cucinare e","in cucina con","ricette di casa","cucina con","chef in camicia"
 ];
 
+// Canali da evitare: video spettacolarizzati, montaggi accelerati senza
+// dosi ne' tempi, "food hack" non riproducibili. Penalita' massima: fuori.
+const BLOCKED_CHANNELS = [
+  "so yummy","5 minute crafts","5-minute crafts","blossom","gotcha","yummy",
+  "tasty japan","food hacks","crazy food","hungry hacks","ideas en 5 minutos"
+];
+
+// Titoli da vetrina: si guardano, non si seguono.
+const CLICKBAIT_TITLE = /\b(incredibile|assurdo|non crederai|shock|hack|trucchi geniali|geniale|virale|tiktok)\b/;
+// Carrellate: "5 ricette per la settimana", "10 idee pranzo". Un video con
+// cinque piatti non insegna QUESTO piatto, e occupa il posto di quello giusto.
+const COMPILATION_TITLE = /\b(\d+|tre|quattro|cinque|sei|sette|otto|dieci|venti)\s+(ricette|idee|piatti|pranzi|cene|modi|versioni|meal prep)\b/;
+
 // Marcatori che indicano che il titolo e' in italiano.
 const IT_MARKERS = [
   "ricetta","ricette","con","alla","al","di","della","del","come","fare",
@@ -117,6 +130,9 @@ function scoreVideo(dish, video, dishIng) {
   const titleTokens = norm(video.title).split(" ");
   const dishTokens = contentTokens(dish.name);
   const channel = norm(video.channel);
+
+  // 0. Canali da evitare: fuori subito, nessun punteggio li recupera.
+  if (BLOCKED_CHANNELS.some(c => channel.includes(c))) return { score: -999, coverage: 0 };
 
   // 1. Quanta parte del nome del piatto compare nel titolo del video.
   const matched = dishTokens.filter(t => tokenMatches(t, titleTokens));
@@ -155,6 +171,10 @@ function scoreVideo(dish, video, dishIng) {
     return { score: 0, coverage };
   }
 
+  // 3c. Carrellate e titoli acchiappa-click.
+  if (COMPILATION_TITLE.test(titleN) && !COMPILATION_TITLE.test(norm(dish.name))) score -= 45;
+  if (CLICKBAIT_TITLE.test(titleN)) score -= 25;
+
   // 4. Canale affidabile di cucina italiana.
   if (TRUSTED_CHANNELS.some(c => channel.includes(c))) score += 12;
 
@@ -166,8 +186,10 @@ function scoreVideo(dish, video, dishIng) {
   else score -= 15;
 
   // 6. Durata: gli Short non spiegano una preparazione.
+  // Sotto i 70 secondi il video e' gia' stato scartato (vedi resolveDish):
+  // uno Short non spiega una preparazione.
   const d = video.durationSec;
-  if (d > 0 && d < 75) score -= 25;
+  if (d >= 70 && d < 120) score -= 12;
   else if (d >= 120 && d <= 1200) score += 6;
   else if (d > 2700) score -= 8;
 
@@ -203,7 +225,8 @@ async function ytSearch(key, query) {
     id: it.id?.videoId,
     title: it.snippet?.title || "",
     channel: it.snippet?.channelTitle || "",
-    thumb: it.snippet?.thumbnails?.medium?.url || it.snippet?.thumbnails?.default?.url || ""
+    thumb: it.snippet?.thumbnails?.medium?.url || it.snippet?.thumbnails?.default?.url || "",
+    thumbHi: it.snippet?.thumbnails?.high?.url || it.snippet?.thumbnails?.medium?.url || ""
   })).filter(v => v.id);
 }
 
@@ -219,7 +242,10 @@ async function ytDetails(key, ids) {
       durationSec: parseDuration(it.contentDetails?.duration),
       embeddable: it.status?.embeddable !== false,
       lang: it.snippet?.defaultAudioLanguage || it.snippet?.defaultLanguage || "",
-      live: it.snippet?.liveBroadcastContent && it.snippet.liveBroadcastContent !== "none"
+      live: it.snippet?.liveBroadcastContent && it.snippet.liveBroadcastContent !== "none",
+      thumbMax: it.snippet?.thumbnails?.maxres?.url ||
+                it.snippet?.thumbnails?.standard?.url ||
+                it.snippet?.thumbnails?.high?.url || ""
     };
   }
   return out;
@@ -253,7 +279,9 @@ async function resolveDish(key, dish, effort) {
     for (const c of candidates) {
       const d = details[c.id] || {};
       if (d.embeddable === false || d.live) continue;
-      const enriched = { ...c, durationSec: d.durationSec || 0, lang: d.lang || "" };
+      // Gli Short non insegnano una preparazione: via prima del punteggio.
+      if (d.durationSec > 0 && d.durationSec < 70) continue;
+      const enriched = { ...c, durationSec: d.durationSec || 0, lang: d.lang || "", thumbMax: d.thumbMax || "" };
       const { score } = scoreVideo(dish, enriched, dishIng);
       if (!best || score > best.score) best = { ...enriched, score };
     }
@@ -269,6 +297,7 @@ async function resolveDish(key, dish, effort) {
         title: best.title,
         channel: best.channel,
         thumb: best.thumb,
+        thumbHi: best.thumbMax || best.thumbHi || best.thumb,
         durationSec: best.durationSec,
         score: best.score,
         url: "https://www.youtube.com/watch?v=" + best.id
@@ -280,10 +309,59 @@ async function resolveDish(key, dish, effort) {
   return value;
 }
 
+// ── GET: PULSANTE "GUARDA IL VIDEO" DELLA VERSIONE SU CLAUDE.AI ─────────────
+// GET /api/video?n=<nome piatto>&q=<ricerca>&i=<ingredienti separati da |>
+// La versione su claude.ai non puo' chiamare server esterni ma puo' aprire un
+// link: qui si sceglie il video con lo stesso punteggio di sempre e si va
+// dritti su YouTube. Se niente supera la soglia, una paginetta lo dice.
+function escHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function noVideoPage(res, name, query, reason) {
+  const search = "https://www.youtube.com/results?search_query=" + encodeURIComponent(query || name || "");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.status(200).send(`<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Nessun video pertinente</title>
+<style>body{font-family:Georgia,serif;background:#F5F0E8;color:#2C2C2C;margin:0;padding:32px 20px;line-height:1.6}
+main{max-width:480px;margin:0 auto}h1{font-size:20px;font-weight:400}p{color:#6B5D4F}
+a{display:inline-block;margin-top:14px;padding:10px 20px;border-radius:40px;background:#2C2C2C;color:#F5F0E8;text-decoration:none}</style></head>
+<body><main><h1>${escHtml(name)}</h1><p>${escHtml(reason)}</p>
+<p>La ricetta scritta nella scheda basta da sola. Se vuoi comunque guardare cosa c'e' su YouTube:</p>
+<a href="${escHtml(search)}">Cerca su YouTube</a></main></body></html>`);
+}
+
+async function redirectHandler(req, res, key) {
+  const q = req.query || {};
+  const name = String(q.n || "").slice(0, 200);
+  if (!name) return res.status(400).send("Manca il nome del piatto.");
+  const dish = {
+    name,
+    videoQuery: String(q.q || "").slice(0, 200),
+    ingredients: String(q.i || "").split("|").map(s => s.trim()).filter(Boolean).slice(0, 25).map(n => ({ name: n }))
+  };
+  const effort = Math.min(3, Math.max(1, Number(q.e) || 3));
+  if (!key) return noVideoPage(res, name, dish.videoQuery, "La ricerca dei video non e' configurata.");
+  try {
+    const v = await resolveDish(key, dish, effort);
+    if (v && v.url) {
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Location", v.url);
+      return res.status(302).end();
+    }
+    return noVideoPage(res, name, dish.videoQuery,
+      "Non ho trovato un video davvero pertinente: meglio nessun video che uno che prepara un altro piatto.");
+  } catch (e) {
+    if (e.status === 403) return noVideoPage(res, name, dish.videoQuery, "La quota giornaliera di YouTube e' esaurita: riprova domani.");
+    return noVideoPage(res, name, dish.videoQuery, "La ricerca del video non ha funzionato in questo momento.");
+  }
+}
+
 // ── HANDLER ─────────────────────────────────────────────────────────────────
 export const maxDuration = 120;
 
 export default async function handler(req, res) {
+  if (req.method === "GET") return redirectHandler(req, res, process.env.YOUTUBE_API_KEY);
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const key = process.env.YOUTUBE_API_KEY;

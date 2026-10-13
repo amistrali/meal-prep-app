@@ -578,7 +578,9 @@ function getFallbackPhoto(query, name) {
   return "https://images.pexels.com/photos/1640777/pexels-photo-1640777.jpeg?auto=compress&cs=tinysrgb&w=400";
 }
 
-function MealImage({ query, name, color, emoji, style }) {
+// La miniatura del video di preparazione e' letteralmente una foto del piatto
+// finito: quando c'e', vince su qualunque foto d'archivio.
+function MealImage({ query, name, color, emoji, style, thumb }) {
   const [imgUrl, setImgUrl] = useState(null);
   const [status, setStatus] = useState("loading");
 
@@ -588,6 +590,7 @@ function MealImage({ query, name, color, emoji, style }) {
     setImgUrl(null);
 
     async function load() {
+      if (thumb) { setImgUrl(thumb); setStatus("ok"); return; }
       // Prova prima Pexels API se la chiave è disponibile
       if (PEXELS_API_KEY && query) {
         const url = await fetchPexelsImage(query);
@@ -606,7 +609,7 @@ function MealImage({ query, name, color, emoji, style }) {
     }
     load();
     return () => { cancelled = true; };
-  }, [query, name]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, name, thumb]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ ...style, position:"relative", overflow:"hidden", background: `linear-gradient(135deg, ${color||"#D4A96A"}22, ${color||"#7BAF8E"}18)` }}>
@@ -1217,7 +1220,7 @@ export default function App() {
                       {meal ? (
                         <div style={{ flex:1, display:"flex", alignItems:"center", gap:10 }}>
                           <div style={{ width:48, height:48, borderRadius:10, flexShrink:0, overflow:"hidden", position:"relative" }}>
-                            <MealImage query={meal.imageQuery} name={meal.name} color={meal.color} emoji={meal.emoji} style={{ width:48, height:48 }} />
+                            <MealImage thumb={meal.video?.thumbHi || meal.video?.thumb} query={meal.imageQuery} name={meal.name} color={meal.color} emoji={meal.emoji} style={{ width:48, height:48 }} />
                           </div>
                           <div style={{ flex:1, minWidth:0 }}>
                             <div style={{ fontSize:12, fontWeight:600, color:"#2C2C2C", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:2 }}>{meal.name}</div>
@@ -1294,7 +1297,7 @@ export default function App() {
                 <div style={{ background:"#fff", borderRadius:18, overflow:"hidden", border:"1.5px solid #EDE6D6", boxShadow:"0 4px 20px rgba(0,0,0,.06)" }}>
                   {/* Foto del piatto */}
                   <div style={{ position:"relative", height:200, overflow:"hidden" }}>
-                    <MealImage query={showRecipe.imageQuery} name={showRecipe.name} style={{ width:"100%", height:"100%" }} />
+                    <MealImage thumb={showRecipe.video?.thumbHi || showRecipe.video?.thumb} query={showRecipe.imageQuery} name={showRecipe.name} style={{ width:"100%", height:"100%" }} />
                     <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 60%)" }} />
                     <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"16px 20px" }}>
                       <div style={{ fontSize:28, marginBottom:4 }}>{showRecipe.emoji}</div>
@@ -1418,7 +1421,7 @@ export default function App() {
                         onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,.04)"}}>
                         {/* Foto thumbnail */}
                         <div style={{ position:"relative", height:120, overflow:"hidden" }}>
-                          <MealImage query={meal.imageQuery} name={meal.name} style={{ width:"100%", height:"100%" }} />
+                          <MealImage thumb={meal.video?.thumbHi || meal.video?.thumb} query={meal.imageQuery} name={meal.name} style={{ width:"100%", height:"100%" }} />
                           <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 50%)" }} />
                           <div style={{ position:"absolute", bottom:6, left:10, fontSize:18 }}>{meal.emoji}</div>
                           {(meal.recipeUrl || meal.video) && (
@@ -1471,7 +1474,7 @@ export default function App() {
                 {preferiti.map(({ meal }) => (
                   <div key={voteKey(meal)} style={{ display:"flex", alignItems:"center", gap:12, background:"#fff", borderRadius:14, padding:"12px 14px", border:"1.5px solid #EDE6D6", boxShadow:"0 2px 10px rgba(0,0,0,.05)" }}>
                     <div style={{ width:48, height:48, borderRadius:10, flexShrink:0, overflow:"hidden" }}>
-                      <MealImage query={meal.imageQuery} name={meal.name} color={meal.color} emoji={meal.emoji} style={{ width:48, height:48 }} />
+                      <MealImage thumb={meal.video?.thumbHi || meal.video?.thumb} query={meal.imageQuery} name={meal.name} color={meal.color} emoji={meal.emoji} style={{ width:48, height:48 }} />
                     </div>
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize:13, fontWeight:600, color:"#2C2C2C", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{meal.name}</div>
