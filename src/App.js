@@ -353,6 +353,30 @@ function selectMeals(candidates, n, level) {
   return out.slice(0, n);
 }
 
+// ── PIANO IN ARRIVO DALLA VERSIONE SU CLAUDE.AI ───────────────────────────
+// Il pulsante "Apri nell'app" dell'artifact apre questa pagina con il piano
+// compresso dopo "#mp=". La parte dopo il # non arriva mai al server: resta
+// nel browser, qui viene decompressa, mostrata e salvata solo se confermi.
+async function decodePlanHash(hash) {
+  if (!hash || !hash.startsWith("#mp=") || typeof DecompressionStream === "undefined") return null;
+  try {
+    const b64 = hash.slice(4).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(b64 + "===".slice((b64.length + 3) % 4));
+    const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    const data = JSON.parse(await new Response(stream).text());
+    if (!data || data.v !== 1 || !data.plan || typeof data.plan !== "object") return null;
+    const plan = {};
+    DAYS.forEach(d => {
+      const m = data.plan[d];
+      if (m && m.name) plan[d] = { ...m, servings: Math.max(1, Math.min(10, Number(m.servings) || 1)) };
+    });
+    return Object.keys(plan).length ? { wk: String(data.wk || ""), plan } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── APP ────────────────────────────────────────────────────────────────────
 // ── LOGIN SCREEN ──────────────────────────────────────────────────────────
 function LoginScreen() {
@@ -659,6 +683,21 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [apiError, setApiError] = useState("");
   const [checkedSl, setCheckedSl] = useState({}); // shopping list item checks
+  const [importOffer, setImportOffer] = useState(null); // piano arrivato da claude.ai
+  const [importTab, setImportTab] = useState("current");
+
+  // Piano mandato dall'artifact su claude.ai: lo leggo dall'indirizzo e lo tolgo
+  // subito dalla barra, cosi' un ricaricamento non lo ripropone.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash.startsWith("#mp=")) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    decodePlanHash(hash).then(offer => {
+      if (!offer) return;
+      setImportTab(offer.wk === getWeekKey(1) ? "next" : "current");
+      setImportOffer(offer);
+    });
+  }, []);
 
   // Auth listener — carica dati quando utente si logga/cambia
   useEffect(() => {
@@ -972,6 +1011,34 @@ export default function App() {
     notify("🔓 Settimana sbloccata.");
   };
 
+  // ── IMPORT DA CLAUDE.AI ───────────────────────────────────────────────────
+  const confirmImport = async () => {
+    const offer = importOffer;
+    if (!offer) return;
+    const tab = importTab;
+    setImportOffer(null);
+    setLoading(true);
+    setLoadingMsg("Cerco su YouTube un video pertinente per ogni ricetta del piano...");
+    const days = DAYS.filter(d => offer.plan[d]);
+    const meals = days.map((d, i) => ({
+      ...offer.plan[d],
+      id: offer.plan[d].id ?? (Date.now() + i + Math.random()),
+      color: offer.plan[d].color || COLORS[i % COLORS.length],
+      emoji: offer.plan[d].emoji || EMOJIS[i % EMOJIS.length]
+    }));
+    const withVideo = await resolveVideos(meals, 2);
+    const plan = emptyPlan();
+    days.forEach((d, i) => { plan[d] = { ...withVideo[i], servings: offer.plan[d].servings || 1 }; });
+    const key = weekKey(tab);
+    const newWeeks = { ...weeks, [key]: { plan, locked: false, lockedList: null, meals: withVideo, videoPriority: 1 } };
+    updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
+    setActiveTab(tab);
+    setView("planner");
+    setLoading(false);
+    setLoadingMsg("");
+    notify(`📲 Piano importato — ${withVideo.filter(m => m.video).length}/${withVideo.length} con video`);
+  };
+
   // ── ARCHIVE ───────────────────────────────────────────────────────────────
   const archiveWeek = (tab) => {
     const key = weekKey(tab);
@@ -1038,6 +1105,37 @@ export default function App() {
       <div style={{ position:"fixed", inset:0, backgroundImage:"radial-gradient(circle at 20% 50%,rgba(212,169,106,.08),transparent 60%),radial-gradient(circle at 80% 20%,rgba(123,175,142,.08),transparent 60%)", pointerEvents:"none" }} />
 
       {notification && <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", background:"#2C2C2C", color:"#F5F0E8", padding:"10px 22px", borderRadius:40, fontSize:13, zIndex:9999, boxShadow:"0 4px 20px rgba(0,0,0,.25)", whiteSpace:"nowrap" }}>{notification}</div>}
+
+      {importOffer && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:"#fff", borderRadius:20, padding:26, maxWidth:460, width:"100%", boxShadow:"0 16px 48px rgba(0,0,0,.25)" }}>
+            <h3 style={{ margin:"0 0 6px", fontSize:17, fontWeight:400, color:"#2C2C2C" }}>📲 Piano in arrivo da claude.ai</h3>
+            <p style={{ margin:"0 0 12px", fontSize:12, color:"#9A8A72" }}>{Object.keys(importOffer.plan).length} ricette{importOffer.wk ? " · settimana " + importOffer.wk : ""}</p>
+            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
+              {DAYS.filter(d => importOffer.plan[d]).map(d => (
+                <div key={d} style={{ display:"flex", gap:10, fontSize:13, color:"#2C2C2C", padding:"6px 0", borderBottom:"1px solid #F0EBE0" }}>
+                  <span style={{ width:70, color:"#9A8A72", flexShrink:0 }}>{d}</span><span>{importOffer.plan[d].emoji} {importOffer.plan[d].name}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:10, letterSpacing:2, color:"#9A8A72", textTransform:"uppercase", marginBottom:6 }}>Mettilo in</div>
+            <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+              {["current","next"].map(t => (
+                <button key={t} onClick={() => setImportTab(t)} style={{ padding:"7px 14px", borderRadius:40, border:importTab===t?"none":"1.5px solid #C8BBA8", background:importTab===t?"#4A7A6A":"transparent", color:importTab===t?"#fff":"#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>{wLabel(t)}</button>
+              ))}
+            </div>
+            {DAYS.some(d => getWD(importTab).plan[d]) && (
+              <div style={{ background:"#FFF8EC", border:"1.5px solid #EDD4A0", borderRadius:10, padding:"8px 12px", fontSize:12, color:"#8A6A2A", marginBottom:10 }}>
+                Sostituisce il piano che c'è già in {wLabel(importTab).toLowerCase()}{getWD(importTab).locked ? " (anche se è bloccato)" : ""}.
+              </div>
+            )}
+            <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:6 }}>
+              <button onClick={() => setImportOffer(null)} style={{ padding:"9px 18px", borderRadius:40, border:"1.5px solid #C8BBA8", background:"transparent", color:"#6B5D4F", fontSize:13, cursor:"pointer", fontFamily:"Georgia,serif" }}>Annulla</button>
+              <button onClick={confirmImport} style={{ padding:"9px 20px", borderRadius:40, border:"none", background:"#2C2C2C", color:"#F5F0E8", fontSize:13, cursor:"pointer", fontFamily:"Georgia,serif" }}>Importa e cerca i video</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {diffModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={() => setDiffModal(null)}>
