@@ -168,36 +168,55 @@ const CATEGORIE = [
 // ricetta tiene ogni chiamata corta e lontana dai limiti della funzione, il
 // tempo d'attesa e' quello della singola piu' lenta, e una chiamata fallita
 // toglie un piatto invece di far cadere l'intera generazione.
-async function generateRecipes(count, prefsStr, likedCtx, extraIstruzioni = "") {
-  const cats = [...CATEGORIE].sort(() => Math.random() - 0.5);
-  const blocchi = [];
-  for (let i = 0; i < count; i++) blocchi.push([cats[i % cats.length]]);
-
-  const esiti = await Promise.allSettled(blocchi.map((catBlocco, idx) => {
-    const n = Math.max(1, catBlocco.length);
-    const richiesta =
-      `Genera ${n} ricette per pranzo da preparare in anticipo` +
-      (catBlocco.length ? `: ${catBlocco.map(c => "una ricetta " + c).join(", ")}` : "") + "." +
-      (prefsStr ? " Preferenze/intolleranze: " + prefsStr + "." : "") +
-      likedCtx + extraIstruzioni +
-      ` Rispondi con un array JSON di ${n} elementi.`;
-    return callClaudeAPI(richiesta, tokensFor(n)).catch(e => { throw new Error(`blocco ${idx}: ${e.message}`); });
-  }));
-
-  const visti = new Set();
-  const meals = [];
-  for (const e of esiti) {
-    if (e.status !== "fulfilled") continue;
-    for (const m of e.value) {
-      const k = String(m?.name || "").toLowerCase().trim();
-      if (!k || visti.has(k)) continue;
-      visti.add(k);
-      meals.push(m);
-    }
-  }
-  if (meals.length === 0) throw new Error("Nessun blocco ha risposto");
-  return meals;
+// ── PRIMA IL VIDEO, POI LA RICETTA ──────────────────────────────────────────
+// Inventare un piatto e poi cercargli un video non funziona: molti piatti
+// sensati non hanno un buon video italiano, e si finisce per accettare un
+// quasi-simile. Qui si parte da video di ricetta veri e si scrive la ricetta
+// di quel video: la corrispondenza non va verificata, e' il punto di partenza.
+async function scopriVideo(temi, evita) {
+  try {
+    const r = await fetch("/api/video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        discover: temi.map((t, i) => ({ key: String(i), theme: t })),
+        avoid: evita.slice(0, 60)
+      })
+    });
+    if (!r.ok) return [];
+    const d = await r.json();
+    const out = [];
+    temi.forEach((t, i) => {
+      (d.discovered?.[String(i)] || []).forEach(v => out.push({ ...v, tema: t }));
+    });
+    return out;
+  } catch { return []; }
 }
+
+// Dal video alla ricetta: il titolo e la descrizione dicono che piatto e',
+// Claude scrive la ricetta di QUEL piatto per una porzione.
+async function ricettaDalVideo(video, prefsStr, likedCtx) {
+  const richiesta =
+    `Questo e' un video di ricetta italiano.\n` +
+    `TITOLO: ${video.title}\n` +
+    `CANALE: ${video.channel}\n` +
+    (video.description ? `DESCRIZIONE (estratto): ${String(video.description).slice(0, 600)}\n` : "") +
+    `\nScrivi la ricetta del piatto preparato in questo video, adattata al meal prep: ` +
+    `porzione singola, preparabile in anticipo, conservabile 3-4 giorni in frigo, trasportabile in contenitore.\n` +
+    `Il campo "name" deve essere il nome pulito del piatto come si direbbe in italiano ` +
+    `(togli maiuscole urlate, nome del canale, emoji e frasi promozionali dal titolo). ` +
+    `Non cambiare piatto: deve restare quello del video.` +
+    (prefsStr ? ` Preferenze/intolleranze da rispettare: ${prefsStr}.` : "") +
+    likedCtx +
+    ` Rispondi con un array JSON di 1 elemento.`;
+  const out = await callClaudeAPI(richiesta, tokensFor(1));
+  const m = Array.isArray(out) ? out[0] : null;
+  if (!m || !m.name) return null;
+  return { ...m, video: { id: video.id, title: video.title, channel: video.channel,
+    durationSec: video.durationSec, thumb: video.thumb, thumbHi: video.thumbHi,
+    url: video.url, score: video.score } };
+}
+
 
 async function callClaudeAPI(userMsg, maxTokens = 4000) {
   const response = await fetch("/api/claude", {
@@ -326,32 +345,39 @@ function primaryKey(meal) {
   return found || normTxt((meal.ingredients || [])[0]?.name || "");
 }
 
+// ── VARIETÀ ALLA RIGENERAZIONE ────────────────────────────────────────────
+// Due piatti sono "lo stesso" se condividono gran parte delle parole del nome
+// (Insalata di farro con pollo / Farro con pollo e zucchine) o se ruotano
+// attorno allo stesso ingrediente caratterizzante.
+function nameTokens(name) {
+  const stop = new Set(["con","alla","alle","allo","agli","del","della","dello","delle","dei","degli","di","al","ai","e","in","la","il","le","lo","gli","un","una","fredda","freddo","light","integrale","integrali","forno","ricetta"]);
+  return normTxt(name).split(" ").filter(t => t.length > 2 && !stop.has(t));
+}
+function troppoSimile(meal, altri) {
+  const a = new Set(nameTokens(meal.name));
+  if (!a.size) return false;
+  return altri.some(o => {
+    if (!o) return false;
+    if (normTxt(o.name) === normTxt(meal.name)) return true;
+    const b = nameTokens(o.name);
+    if (!b.length) return false;
+    const comuni = b.filter(t => a.has(t)).length;
+    return comuni / Math.min(a.size, b.length) >= 0.6;
+  });
+}
+// Istruzione per l'AI: cosa non riproporre e quali ingredienti principali lasciare stare.
+function evitaCtx(meals) {
+  const nomi = [...new Set(meals.filter(Boolean).map(m => m.name))].slice(0, 30);
+  const chiavi = [...new Set(meals.filter(Boolean).map(primaryKey).filter(Boolean))].slice(0, 15);
+  if (!nomi.length) return "";
+  return ` STAI RIGENERANDO: le nuove ricette devono essere MOLTO DIVERSE da quelle di prima. NON riproporre questi piatti né loro varianti (stesso piatto con un ingrediente cambiato, stesso formato con la stessa base): ${nomi.join("; ")}.` +
+    (chiavi.length ? ` Come ingrediente principale evita: ${chiavi.join(", ")}.` : "") +
+    " Cambia anche formato e cucina rispetto a quelli elencati.";
+}
+
 // Sceglie n piatti dando priorità a quelli con video verificato.
 // level 1-2: la varietà resta un vincolo, un piatto senza video entra pur di
 // non ripetere l'ingrediente. level 3: il video vince anche sulla varietà.
-function selectMeals(candidates, n, level) {
-  const withVideo = candidates.filter(m => m.video).sort((a, b) => (b.video.score || 0) - (a.video.score || 0));
-  const withoutVideo = candidates.filter(m => !m.video);
-  const out = [];
-  const used = new Set();
-
-  const take = (list, respectVariety) => {
-    for (const m of list) {
-      if (out.length >= n) return;
-      if (out.includes(m)) continue;
-      const k = primaryKey(m);
-      if (respectVariety && k && used.has(k)) continue;
-      out.push(m);
-      if (k) used.add(k);
-    }
-  };
-
-  take(withVideo, true);
-  if (level < 3) take(withoutVideo, true);
-  take(withVideo, false);
-  take(withoutVideo, false);
-  return out.slice(0, n);
-}
 
 // ── PIANO IN ARRIVO DALLA VERSIONE SU CLAUDE.AI ───────────────────────────
 // Il pulsante "Apri nell'app" dell'artifact apre questa pagina con il piano
@@ -864,74 +890,89 @@ export default function App() {
   // La priorità ai piatti con video parte già alta (livello 1 = FORTE) e sale
   // ad ogni rigenerazione: più candidati, ricerca video più insistente e, al
   // livello 3, il video conta più della varietà.
-  const generateWeek = async (tab, levelOverride) => {
+  const generateWeek = async (tab) => {
     const key = weekKey(tab);
-    const prevLevel = weeks[key]?.videoPriority || 0;
-    const level = levelOverride ?? Math.min(3, prevLevel + 1);
-    const candidateCount = level === 1 ? 8 : level === 2 ? 11 : 12;
-
     setLoading(true);
     setApiError("");
-    setLoadingMsg(level === 1
-      ? `Genero ${candidateCount} ricette in parallelo (circa un minuto)...`
-      : `Rigenero con priorità video ${level}/3 — ${candidateCount} ricette, cerco più a fondo...`);
 
     const likedCtx = buildGustiCtx();
     const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
-    let rawMeals;
-    let usedFallback = false;
 
-    try {
-      rawMeals = await generateRecipes(candidateCount, prefsStr, likedCtx);
-    } catch {
-      rawMeals = [...FALLBACK_MEALS].sort(() => Math.random() - 0.5);
-      usedFallback = true;
+    // Niente che somigli a quello che hai gia' avuto: questa settimana (riserve
+    // comprese), l'altra settimana, e le ultime settimane in archivio.
+    const altraTab = tab === "current" ? "next" : "current";
+    const giaVisti = [
+      ...(weeks[key]?.meals || []),
+      ...DAYS.map(d => weeks[key]?.plan?.[d]),
+      ...DAYS.map(d => getWD(altraTab).plan[d]),
+      ...archive.slice(0, 4).flatMap(a => a.meals || [])
+    ].filter(Boolean);
+    const nomiDaEvitare = [...new Set(giaVisti.map(m => m.name).filter(Boolean))];
+
+    setLoadingMsg("Cerco su YouTube video di ricette veri...");
+    // Piu' temi che giorni: se una categoria non da' niente di buono si passa
+    // alla successiva, finche' i cinque giorni sono coperti.
+    const temi = [...CATEGORIE].sort(() => Math.random() - 0.5).slice(0, 8);
+    let trovati = await scopriVideo(temi, nomiDaEvitare);
+
+    if (trovati.length === 0) {
+      setLoading(false); setLoadingMsg("");
+      setApiError("Non ho trovato video di ricette utilizzabili. Puo' essere la quota YouTube esaurita per oggi, oppure la chiave non configurata.");
+      notify("Nessun video trovato: riprovo volentieri piu' tardi.");
+      return;
     }
 
-    setLoadingMsg("Cerco su YouTube un video pertinente per ogni ricetta...");
-    let candidates = await resolveVideos(assignVisuals(rawMeals), level);
-
-    // Dal livello 2 in su, se i video scarseggiano faccio un secondo giro
-    // chiedendo esplicitamente piatti classici, quelli che un video ce l'hanno.
-    if (!usedFallback && level >= 2 && candidates.filter(m => m.video).length < 5) {
-      try {
-        const already = candidates.map(m => m.name).join(", ");
-        setLoadingMsg("Pochi video trovati: cerco piatti più classici...");
-        const extraRaw = await generateRecipes(6, prefsStr, "",
-          ` Evita questi piatti gia' proposti: ${already}.` +
-          ` Scegli SOLO piatti classici e molto conosciuti della cucina italiana e mediterranea, con il nome esatto con cui sono noti.`
-        );
-        const extra = await resolveVideos(assignVisuals(extraRaw), 3);
-        candidates = [...candidates, ...extra];
-      } catch { /* il primo giro basta */ }
+    // Un video per tema, il migliore, e mai due dallo stesso canale.
+    const scelti = [];
+    const temiUsati = new Set(), canaliUsati = new Set();
+    for (const v of trovati.sort((a, b) => b.score - a.score)) {
+      if (scelti.length >= 5) break;
+      if (temiUsati.has(v.tema)) continue;
+      if (canaliUsati.has(v.channel)) continue;
+      scelti.push(v); temiUsati.add(v.tema); canaliUsati.add(v.channel);
+    }
+    for (const v of trovati) {
+      if (scelti.length >= 5) break;
+      if (scelti.some(x => x.id === v.id)) continue;
+      scelti.push(v);
     }
 
-    const chosen = selectMeals(candidates, 5, level).map((m, i) => ({
+    setLoadingMsg(`Trovati ${scelti.length} video. Scrivo le ricette (circa un minuto)...`);
+    const esiti = await Promise.allSettled(scelti.map(v => ricettaDalVideo(v, prefsStr, likedCtx)));
+    let meals = esiti.filter(e => e.status === "fulfilled" && e.value).map(e => e.value);
+
+    // Ultima rete: se l'AI ha scritto due volte lo stesso piatto, o uno gia' visto.
+    const visti = new Set();
+    meals = meals.filter(m => {
+      const k = normTxt(m.name);
+      if (!k || visti.has(k)) return false;
+      visti.add(k);
+      return !troppoSimile(m, giaVisti);
+    });
+
+    if (meals.length === 0) {
+      setLoading(false); setLoadingMsg("");
+      setApiError("I video c'erano, ma la scrittura delle ricette non e' riuscita. Riprova fra un momento.");
+      notify("Generazione non riuscita.");
+      return;
+    }
+
+    meals = assignVisuals(meals).map((m, i) => ({
       ...m, color: COLORS[i % COLORS.length], emoji: EMOJIS[i % EMOJIS.length]
     }));
-    const meals = chosen.length >= 5 ? chosen : assignVisuals(candidates.slice(0, 5));
     const plan = Object.fromEntries(DAYS.map((d, i) => [d, meals[i] ? { ...meals[i], servings: 1 } : null]));
 
     const newWeeks = {
       ...weeks,
-      [key]: { plan, locked: false, lockedList: null, meals: candidates, videoPriority: level }
+      [key]: { plan, locked: false, lockedList: null, meals, videoPriority: 0 }
     };
     updateWeeks(newWeeks, archive, prefsHistory, activePrefs);
 
     setLoading(false);
     setLoadingMsg("");
-
-    const withVideo = meals.filter(m => m.video).length;
-    if (usedFallback) {
-      setApiError("⚠️ API non raggiungibile: ho caricato ricette di esempio. Verifica che il file api/claude.js sia presente e che la variabile ANTHROPIC_KEY sia impostata su Vercel.");
-      notify("📋 Piano caricato con ricette di esempio");
-    } else if (withVideo === 5) {
-      notify("✨ Piano generato — tutte e 5 le ricette hanno un video verificato!");
-    } else if (level < 3) {
-      notify(`✨ Piano generato — ${withVideo}/5 con video. Rigenera per insistere di più sui video.`);
-    } else {
-      notify(`✨ Piano generato — ${withVideo}/5 con video (priorità già al massimo).`);
-    }
+    notify(meals.length === 5
+      ? "✨ Piano pronto — 5 ricette, ognuna scritta sul suo video."
+      : `✨ Piano pronto — ${meals.length} ricette con video. Per gli altri giorni pesca dai preferiti o rigenera.`);
   };
 
   // ── SWAP ──────────────────────────────────────────────────────────────────
@@ -939,7 +980,16 @@ export default function App() {
     const wd = getWD(tab);
     if (wd.locked) { notify("🔒 Sblocca prima di modificare."); return; }
     const inPlan = DAYS.map(d => wd.plan[d]?.id).filter(Boolean);
-    const spare = (wd.meals || []).filter(m => m.id && !inPlan.includes(m.id));
+    const tolto = wd.plan[day];
+    const altriGiorni = DAYS.filter(d => d !== day).map(d => wd.plan[d]).filter(Boolean);
+    const chiaviAltri = new Set(altriGiorni.map(primaryKey).filter(Boolean));
+    // Una riserva vale solo se e' davvero diversa: dal piatto che tolgo, dagli
+    // altri giorni (nome e ingrediente principale) e da quello che hai scartato.
+    const spare = (wd.meals || []).filter(m => m.id && !inPlan.includes(m.id)
+      && voteOf(m) !== -1
+      && !troppoSimile(m, [tolto, ...altriGiorni])
+      && !chiaviAltri.has(primaryKey(m))
+      && (!tolto || primaryKey(m) !== primaryKey(tolto)));
 
     if (spare.length > 0) {
       // Fra le riserve, quelle con video verificato hanno la precedenza.
@@ -955,10 +1005,10 @@ export default function App() {
     }
 
     setLoading(true); setLoadingMsg("Cerco una ricetta alternativa...");
-    const currentNames = DAYS.map(d => wd.plan[d]?.name).filter(Boolean).join(", ");
     try {
       const prefsStr = activePrefs.length > 0 ? activePrefs.join(", ") : "";
-      const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo, diversa da: ${currentNames}.${prefsStr ? " Preferenze: " + prefsStr : ""}${buildGustiCtx()} Rispondi con array JSON di 1 elemento.`);
+      const daEvitare = [tolto, ...altriGiorni, ...(wd.meals || [])].filter(Boolean);
+      const parsed = await callClaudeAPI(`Genera UNA ricetta per pranzo.${evitaCtx(daEvitare)}${prefsStr ? " Preferenze: " + prefsStr : ""}${buildGustiCtx()} Rispondi con array JSON di 1 elemento.`);
       setLoadingMsg("Cerco il video di preparazione...");
       const meal = (await resolveVideos(assignVisuals([parsed[0]]), 3))[0];
       const newMeals = [...(wd.meals || []), meal];
@@ -1061,7 +1111,6 @@ export default function App() {
   const activeSl = sl.filter(i => checkedSl[i.name] !== false);
   const hasData = DAYS.some(d => plan[d]);
   // Livello di priorità video che verrà usato alla prossima generazione (1..3).
-  const nextVideoLevel = Math.min(3, (wd.videoPriority || 0) + 1);
   const videoCount = DAYS.filter(d => plan[d]?.video).length;
   const wLabel = (t) => `${t === "current" ? "Sett. corrente" : "Sett. successiva"} (W${weekKey(t).split("-W")[1]})`;
 
@@ -1211,11 +1260,11 @@ export default function App() {
                   <button onClick={() => setShowPrefs(!showPrefs)} style={{ padding:"6px 12px", borderRadius:40, border: activePrefs.length > 0 ? "1.5px solid #4A7A6A" : "1.5px solid #C8BBA8", background: activePrefs.length > 0 ? "#E8F5EE" : "transparent", color: activePrefs.length > 0 ? "#4A7A6A" : "#6B5D4F", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif" }}>⚙️ Preferenze{activePrefs.length > 0 ? ` (${activePrefs.length})` : ""}</button>
                   <button onClick={() => generateWeek(activeTab)}
                     title={hasData
-                      ? `Ogni rigenerazione alza la priorità ai piatti con video (prossimo livello: ${nextVideoLevel}/3)`
-                      : "Genera 5 ricette cercando per ognuna un video di preparazione pertinente"}
+                      ? "Cerca altri video di ricetta e riscrive la settimana da capo"
+                      : "Cerca video di ricetta veri e scrive la ricetta di ognuno"}
                     style={{ padding:"6px 16px", borderRadius:40, border:"none", background:"#D4A96A", color:"#fff", fontSize:12, cursor:"pointer", fontFamily:"Georgia,serif", boxShadow:"0 2px 8px rgba(212,169,106,.35)" }}>
                     {hasData
-                      ? `🔁 Rigenera · video ${"●".repeat(nextVideoLevel)}${"○".repeat(3 - nextVideoLevel)}`
+                      ? "🔁 Rigenera"
                       : "✨ Genera ricette"}
                   </button>
                 </div>
@@ -1354,7 +1403,8 @@ export default function App() {
                               const currentNames = DAYS.map(d => plan[d]?.name).filter(Boolean).join(", ");
                               setLoading(true); setLoadingMsg("Genero una ricetta per " + day + "...");
                               try {
-                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + (activePrefs.length > 0 ? " Preferenze: " + activePrefs.join(", ") : "") + buildGustiCtx() + " Rispondi con array JSON di 1 elemento.");
+                                const daEvitare = [...DAYS.map(d => plan[d]), ...(wd.meals || [])].filter(Boolean);
+                                const parsed = await callClaudeAPI("Genera UNA ricetta per pranzo da preparare in anticipo, diversa da: " + (currentNames || "nessuna") + "." + evitaCtx(daEvitare) + (activePrefs.length > 0 ? " Preferenze: " + activePrefs.join(", ") : "") + buildGustiCtx() + " Rispondi con array JSON di 1 elemento.");
                                 setLoadingMsg("Cerco il video di preparazione...");
                                 const meal = (await resolveVideos(assignVisuals([parsed[0]]), 3))[0];
                                 const newMeals = [...(wd.meals || []), meal];

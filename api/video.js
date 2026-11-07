@@ -242,6 +242,7 @@ async function ytDetails(key, ids) {
       durationSec: parseDuration(it.contentDetails?.duration),
       embeddable: it.status?.embeddable !== false,
       lang: it.snippet?.defaultAudioLanguage || it.snippet?.defaultLanguage || "",
+      description: it.snippet?.description || "",
       live: it.snippet?.liveBroadcastContent && it.snippet.liveBroadcastContent !== "none",
       thumbMax: it.snippet?.thumbnails?.maxres?.url ||
                 it.snippet?.thumbnails?.standard?.url ||
@@ -309,6 +310,94 @@ async function resolveDish(key, dish, effort) {
   return value;
 }
 
+// ── SCOPERTA: PRIMA IL VIDEO, POI LA RICETTA ───────────────────────────────
+// Cercare un video per un piatto gia' inventato non funziona: molti piatti
+// sensati non hanno un buon video italiano, e si finisce per accettare un
+// quasi-simile. Qui si rovescia: si cercano video di ricetta veri su un tema,
+// si tiene solo quello che e' davvero una ricetta di un piatto solo, e la
+// ricetta verra' scritta su quel video. La corrispondenza non si verifica:
+// e' il punto di partenza.
+
+// Titoli che non sono UN piatto: raccolte, classifiche, vlog, sfide.
+const NON_UN_PIATTO = [
+  /\b\d+\s*(ricette|idee|modi|piatti|primi|secondi|contorni|dolci|antipasti)\b/,
+  /\b(ricette|idee|piatti)\s+(facili|veloci|per|di|da|con)\b/,
+  /\b(menu|menù|compilation|raccolta|carrellata|playlist|puntata|episodio|vlog|challenge|sfida|degustazione|classifica|top\s*\d+)\b/,
+  /\b(cosa cucino|cosa mangio|una settimana|7 giorni|meal prep per)\b/
+];
+
+function sembraUnPiatto(titolo) {
+  const t = norm(titolo);
+  if (NON_UN_PIATTO.some(re => re.test(t))) return false;
+  // Deve restare qualcosa di sostanziale dopo aver tolto le parole di servizio.
+  return contentTokens(titolo).length >= 2;
+}
+
+// Quanto un video e' un buon punto di partenza: non "assomiglia al piatto X",
+// ma "e' una ricetta italiana pulita, di un piatto solo, fatta con pentole normali".
+function scoreCandidato(v) {
+  const t = norm(v.title);
+  let s = 50;
+
+  const robot = /\b(bimby|thermomix|tm5|tm6|tm31|tm21|monsieur cuisine|cuisine companion|kenwood cooking|magic cooker)\b/;
+  if (robot.test(t)) return 0;
+  if (!sembraUnPiatto(v.title)) return 0;
+
+  const lang = (v.lang || "").toLowerCase();
+  if (lang.startsWith("it")) s += 18;
+  else if (lang) return 0;
+  else if (isItalianTitle(v.title)) s += 8;
+  else return 0;
+
+  if (/\b(ricetta|ricette|come fare|come preparare|passo passo)\b/.test(t)) s += 10;
+  if (TRUSTED_CHANNELS.some(c => norm(v.channel).includes(c))) s += 15;
+
+  const d = v.durationSec || 0;
+  if (d < 120 || d > 2400) return 0;
+  if (d >= 180 && d <= 900) s += 8;
+
+  // Titoli urlati e acchiappaclick: spesso non sono ricette ma intrattenimento.
+  const maiuscole = (v.title.match(/[A-Z]/g) || []).length / Math.max(1, v.title.length);
+  if (maiuscole > 0.6) s -= 10;
+  // Senza \b finale: "pazzesc" deve agganciare anche "pazzesca" e "pazzeschi".
+  if (/(incredibil|pazzesc|assurd|nessuno|segreto|wow|mai piu|vi stupir|non crederai)/.test(t)) s -= 30;
+
+  return s;
+}
+
+const MIN_CANDIDATO = 60;
+
+async function scopriVideo(key, tema, evita) {
+  const query = tema + " ricetta";
+  let grezzi;
+  try { grezzi = await ytSearch(key, query); } catch (e) { if (e.status === 403) throw e; return []; }
+  if (!grezzi.length) return [];
+
+  const dett = await ytDetails(key, grezzi.map(c => c.id).slice(0, 50));
+  const evitaNorm = (evita || []).map(norm).filter(Boolean);
+
+  const buoni = [];
+  for (const c of grezzi) {
+    const d = dett[c.id] || {};
+    if (d.embeddable === false || d.live) continue;
+    const v = { ...c, durationSec: d.durationSec || 0, lang: d.lang || "", description: (d.description || "").slice(0, 700) };
+    const punteggio = scoreCandidato(v);
+    if (punteggio < MIN_CANDIDATO) continue;
+    // Niente che somigli a un piatto gia' proposto nelle settimane scorse.
+    const tit = norm(v.title);
+    if (evitaNorm.some(n => n && (tit.includes(n) || contentTokens(n).every(t => tit.includes(t))))) continue;
+    buoni.push({ ...v, score: punteggio });
+  }
+  buoni.sort((a, b) => b.score - a.score);
+  return buoni.slice(0, 3).map(v => ({
+    id: v.id, title: v.title, channel: v.channel, durationSec: v.durationSec,
+    description: v.description, score: v.score,
+    thumb: "https://i.ytimg.com/vi/" + v.id + "/mqdefault.jpg",
+    thumbHi: "https://i.ytimg.com/vi/" + v.id + "/hqdefault.jpg",
+    url: "https://www.youtube.com/watch?v=" + v.id
+  }));
+}
+
 // ── GET: PULSANTE "GUARDA IL VIDEO" DELLA VERSIONE SU CLAUDE.AI ─────────────
 // GET /api/video?n=<nome piatto>&q=<ricerca>&i=<ingredienti separati da |>
 // La versione su claude.ai non puo' chiamare server esterni ma puo' aprire un
@@ -367,6 +456,20 @@ export default async function handler(req, res) {
   const key = process.env.YOUTUBE_API_KEY;
   if (!key) {
     return res.status(200).json({ results: {}, warning: "missing_key" });
+  }
+
+  // Scoperta: dammi video di ricetta veri su questi temi.
+  if (Array.isArray(req.body?.discover)) {
+    const temi = req.body.discover.slice(0, 10);
+    const evita = Array.isArray(req.body.avoid) ? req.body.avoid.slice(0, 60) : [];
+    const out = {};
+    let quota = null;
+    for (const t of temi) {
+      if (quota) break;
+      try { out[t.key ?? t.theme] = await scopriVideo(key, String(t.theme || ""), evita); }
+      catch (e) { if (e.status === 403) quota = e.detail || "quota"; out[t.key ?? t.theme] = []; }
+    }
+    return res.status(200).json(quota ? { discovered: out, warning: "quota" } : { discovered: out });
   }
 
   const dishes = Array.isArray(req.body?.dishes) ? req.body.dishes.slice(0, 20) : [];
