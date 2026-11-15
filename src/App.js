@@ -173,14 +173,15 @@ const CATEGORIE = [
 // sensati non hanno un buon video italiano, e si finisce per accettare un
 // quasi-simile. Qui si parte da video di ricetta veri e si scrive la ricetta
 // di quel video: la corrispondenza non va verificata, e' il punto di partenza.
-async function scopriVideo(temi, evita) {
+async function scopriVideo(temi, evita, filtro) {
   try {
     const r = await fetch("/api/video", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         discover: temi.map((t, i) => ({ key: String(i), theme: t })),
-        avoid: evita.slice(0, 60)
+        avoid: evita.slice(0, 60),
+        filter: filtro || {}
       })
     });
     if (!r.ok) return [];
@@ -191,6 +192,46 @@ async function scopriVideo(temi, evita) {
     });
     return out;
   } catch { return []; }
+}
+
+// ── LE PREFERENZE PRIMA DELLA RICERCA ──────────────────────────────────────
+// Scritte in liberta' ("vegetariano", "niente maiale ne' lattosio", "poco
+// piccante") non servono a nulla se arrivano a piatto gia' scelto. Qui una
+// chiamata piccola le traduce in: quali categorie saltare, quali temi nuovi
+// cercare, quali parole vietare nei titoli dei video, cosa aggiungere alla
+// ricerca. Costa poche centinaia di token e orienta tutto il resto.
+const SYSTEM_FILTRO = `Traduci preferenze alimentari in un filtro di ricerca.
+Rispondi ESCLUSIVAMENTE con un array JSON valido di UN solo elemento, senza testo prima o dopo, senza markdown.`;
+
+const FILTRO_VUOTO = { esclusi: [], temiExtra: [], vietate: [], cercate: [] };
+
+async function interpretaPreferenze(prefsStr) {
+  if (!prefsStr) return FILTRO_VUOTO;
+  const richiesta =
+    `Preferenze alimentari dell'utente: "${prefsStr}".\n\n` +
+    `Categorie di ricerca disponibili:\n` +
+    CATEGORIE.map((c, i) => `${i}: ${c}`).join("\n") + `\n\n` +
+    `Rispondi con [{"esclusi":[...],"temiExtra":[...],"vietate":[...],"cercate":[...]}] dove:\n` +
+    `- "esclusi": i NUMERI delle categorie incompatibili con le preferenze (array vuoto se nessuna lo e').\n` +
+    `- "temiExtra": fino a 4 nuovi temi di ricerca coerenti con le preferenze, scritti nello stesso stile delle categorie (es. "a base di tofu o tempeh"). Array vuoto se le preferenze non suggeriscono nulla di nuovo.\n` +
+    `- "vietate": fino a 25 RADICI di parole italiane che non devono comparire nel titolo di un video. Usa la radice comune, non la parola intera: "gamber" (gamberi, gamberetti), "salsicc", "prosciutt", "formagg". Minimo 4 lettere. Solo ingredienti davvero esclusi: se la preferenza non vieta ingredienti (es. "poco piccante", "veloce"), lascia l'array vuoto.\n` +
+    `- "cercate": fino a 3 parole da aggiungere alla ricerca YouTube per orientarla (es. "vegetariano", "senza glutine"). Array vuoto se non servono.\n\n` +
+    `Sii rigoroso ma non esagerare: vietare troppo lascia l'utente senza ricette.`;
+  try {
+    const out = await callClaudeAPI(richiesta, 900, SYSTEM_FILTRO);
+    const f = Array.isArray(out) ? out[0] : null;
+    if (!f) return FILTRO_VUOTO;
+    const num = Array.isArray(f.esclusi) ? f.esclusi.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < CATEGORIE.length) : [];
+    const txt = (a, n) => (Array.isArray(a) ? a : []).map(x => String(x || "").trim()).filter(Boolean).slice(0, n);
+    return {
+      esclusi: num,
+      temiExtra: txt(f.temiExtra, 4),
+      vietate: txt(f.vietate, 25).map(s => s.toLowerCase()).filter(s => s.length >= 4),
+      cercate: txt(f.cercate, 3)
+    };
+  } catch {
+    return FILTRO_VUOTO;   // se la traduzione fallisce si procede, non si blocca tutto
+  }
 }
 
 // Dal video alla ricetta: il titolo e la descrizione dicono che piatto e',
@@ -206,10 +247,18 @@ async function ricettaDalVideo(video, prefsStr, likedCtx) {
     `Il campo "name" deve essere il nome pulito del piatto come si direbbe in italiano ` +
     `(togli maiuscole urlate, nome del canale, emoji e frasi promozionali dal titolo). ` +
     `Non cambiare piatto: deve restare quello del video.` +
-    (prefsStr ? ` Preferenze/intolleranze da rispettare: ${prefsStr}.` : "") +
+    (prefsStr
+      ? ` L'utente ha queste preferenze/intolleranze, non negoziabili: ${prefsStr}. ` +
+        `Se il piatto del video le rispetta gia', scrivilo com'e'. ` +
+        `Se non le rispetta per un dettaglio sostituibile senza cambiare piatto, sostituisci quel dettaglio e dillo in "tips". ` +
+        `Se invece il piatto e' incompatibile nella sostanza (l'ingrediente vietato E' il piatto), ` +
+        `NON inventare un altro piatto e NON forzare la sostituzione: rispondi con un array JSON vuoto [].`
+      : "") +
     likedCtx +
     ` Rispondi con un array JSON di 1 elemento.`;
-  const out = await callClaudeAPI(richiesta, tokensFor(1));
+  let out;
+  try { out = await callClaudeAPI(richiesta, tokensFor(1)); }
+  catch { return null; }   // [] fa fallire il parsing: e' un rifiuto, non un errore
   const m = Array.isArray(out) ? out[0] : null;
   if (!m || !m.name) return null;
   return { ...m, video: { id: video.id, title: video.title, channel: video.channel,
@@ -218,14 +267,14 @@ async function ricettaDalVideo(video, prefsStr, likedCtx) {
 }
 
 
-async function callClaudeAPI(userMsg, maxTokens = 4000) {
+async function callClaudeAPI(userMsg, maxTokens = 4000, system = SYSTEM_PROMPT) {
   const response = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: maxTokens,
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: "user", content: userMsg }],
     }),
   });
@@ -302,9 +351,23 @@ const KEY_ING = [
   "parmigiano","burrata","gorgonzola"
 ];
 
+// Ingrediente caratterizzante indovinato dal solo titolo del video: serve a non
+// scegliere cinque video che girano tutti attorno al pollo solo perche'
+// arrivavano da categorie diverse.
+function ingDaTitolo(titolo) {
+  const hay = " " + normTxt(titolo) + " ";
+  return KEY_ING.find(k => hay.includes(" " + k)) || "";
+}
+
 function normTxt(s) {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Stessa radice usata da /api/video per gli ingredienti vietati: togliendo la
+// vocale finale singolare e plurale cadono insieme (maiale/maiali -> maial).
+function radice(w) {
+  return w.length >= 5 && /[aeiou]$/.test(w) ? w.slice(0, -1) : w;
 }
 
 // I preferiti sono indicizzati per NOME normalizzato, non per id: gli id sono
@@ -908,51 +971,102 @@ export default function App() {
       ...archive.slice(0, 4).flatMap(a => a.meals || [])
     ].filter(Boolean);
     const nomiDaEvitare = [...new Set(giaVisti.map(m => m.name).filter(Boolean))];
+    // Gli ingredienti principali delle ultime due settimane: non vietati, ma
+    // tenuti da parte finche' c'e' altro con cui riempire i cinque giorni.
+    const ingRecenti = new Set([
+      ...DAYS.map(d => getWD(altraTab).plan[d]),
+      ...archive.slice(0, 2).flatMap(a => a.meals || [])
+    ].filter(Boolean).map(primaryKey).filter(Boolean));
+
+    // Le preferenze agiscono PRIMA della ricerca, non dopo.
+    let filtro = FILTRO_VUOTO;
+    if (prefsStr) {
+      setLoadingMsg("Leggo le tue preferenze...");
+      filtro = await interpretaPreferenze(prefsStr);
+    }
 
     setLoadingMsg("Cerco su YouTube video di ricette veri...");
-    // Piu' temi che giorni: se una categoria non da' niente di buono si passa
-    // alla successiva, finche' i cinque giorni sono coperti.
-    const temi = [...CATEGORIE].sort(() => Math.random() - 0.5).slice(0, 8);
-    let trovati = await scopriVideo(temi, nomiDaEvitare);
+    // Temi: le categorie compatibili con le preferenze, piu' quelle suggerite
+    // dalle preferenze stesse. Piu' temi che giorni, cosi' se uno non da'
+    // niente di buono si passa al successivo.
+    const base = CATEGORIE.filter((_, i) => !filtro.esclusi.includes(i));
+    const mescola = a => [...a].sort(() => Math.random() - 0.5);
+    const temi = [...new Set([...mescola(filtro.temiExtra), ...mescola(base.length ? base : CATEGORIE)])].slice(0, 8);
+
+    let trovati = await scopriVideo(temi, nomiDaEvitare, {
+      ban: filtro.vietate, boost: filtro.cercate, extra: filtro.cercate.join(" ")
+    });
 
     if (trovati.length === 0) {
       setLoading(false); setLoadingMsg("");
-      setApiError("Non ho trovato video di ricette utilizzabili. Puo' essere la quota YouTube esaurita per oggi, oppure la chiave non configurata.");
+      setApiError(filtro.vietate.length > 0
+        ? "Nessun video di ricetta compatibile con le preferenze attive. Prova a toglierne qualcuna, oppure riprova piu' tardi: puo' anche essere la quota YouTube esaurita per oggi."
+        : "Non ho trovato video di ricette utilizzabili. Puo' essere la quota YouTube esaurita per oggi, oppure la chiave non configurata.");
       notify("Nessun video trovato: riprovo volentieri piu' tardi.");
       return;
     }
 
-    // Un video per tema, il migliore, e mai due dallo stesso canale.
+    // Scelta dei cinque: varieta' massima prima, vincoli allentati solo se
+    // altrimenti resterebbero giorni scoperti.
+    // Ordine per punteggio, ma con un pizzico di casualita': fra due video quasi
+    // equivalenti non deve vincere sempre lo stesso, altrimenti due rigenerazioni
+    // di fila sullo stesso tema danno lo stesso piatto. Il jitter si calcola una
+    // volta sola per video: Math.random() dentro il comparatore darebbe un
+    // ordinamento incoerente.
+    const ordinati = trovati
+      .map(v => ({ v, r: v.score + Math.random() * 7 }))
+      .sort((a, b) => b.r - a.r)
+      .map(x => x.v);
     const scelti = [];
-    const temiUsati = new Set(), canaliUsati = new Set();
-    for (const v of trovati.sort((a, b) => b.score - a.score)) {
-      if (scelti.length >= 5) break;
-      if (temiUsati.has(v.tema)) continue;
-      if (canaliUsati.has(v.channel)) continue;
-      scelti.push(v); temiUsati.add(v.tema); canaliUsati.add(v.channel);
-    }
-    for (const v of trovati) {
-      if (scelti.length >= 5) break;
-      if (scelti.some(x => x.id === v.id)) continue;
-      scelti.push(v);
-    }
+    const temiUsati = new Set(), canaliUsati = new Set(), ingUsati = new Set();
+    const pesca = (vincoli) => {
+      for (const v of ordinati) {
+        if (scelti.length >= 5) return;
+        if (scelti.some(x => x.id === v.id)) continue;
+        const ing = ingDaTitolo(v.title);
+        if (vincoli.tema && temiUsati.has(v.tema)) continue;
+        if (vincoli.canale && canaliUsati.has(v.channel)) continue;
+        if (vincoli.ing && ing && ingUsati.has(ing)) continue;
+        if (vincoli.recenti && ing && ingRecenti.has(ing)) continue;
+        scelti.push(v); temiUsati.add(v.tema); canaliUsati.add(v.channel);
+        if (ing) ingUsati.add(ing);
+      }
+    };
+    pesca({ tema: true, canale: true, ing: true, recenti: true });
+    pesca({ tema: true, canale: true, ing: true });
+    pesca({ canale: true, ing: true });
+    pesca({});
 
     setLoadingMsg(`Trovati ${scelti.length} video. Scrivo le ricette (circa un minuto)...`);
     const esiti = await Promise.allSettled(scelti.map(v => ricettaDalVideo(v, prefsStr, likedCtx)));
     let meals = esiti.filter(e => e.status === "fulfilled" && e.value).map(e => e.value);
 
-    // Ultima rete: se l'AI ha scritto due volte lo stesso piatto, o uno gia' visto.
-    const visti = new Set();
+    // Rete di sicurezza sulle preferenze: se un ingrediente vietato e' finito
+    // comunque nella lista della spesa, il piatto non va in tavola.
+    const radici = filtro.vietate.map(radice).filter(w => w.length >= 4);
+    const violaPrefs = (m) => radici.length > 0 &&
+      (normTxt(m.name) + " " + (m.ingredients || []).map(i => normTxt(i.name)).join(" "))
+        .split(" ").map(radice).some(t => radici.some(w => t.startsWith(w)));
+
+    // Ultima rete: stesso piatto scritto due volte, piatto gia' visto, stesso
+    // ingrediente principale due volte nella stessa settimana.
+    const visti = new Set(), ingFinali = new Set();
     meals = meals.filter(m => {
+      if (violaPrefs(m)) return false;
       const k = normTxt(m.name);
       if (!k || visti.has(k)) return false;
-      visti.add(k);
-      return !troppoSimile(m, giaVisti);
+      if (troppoSimile(m, giaVisti)) return false;
+      const ing = primaryKey(m);
+      if (ing && ingFinali.has(ing)) return false;
+      visti.add(k); if (ing) ingFinali.add(ing);
+      return true;
     });
 
     if (meals.length === 0) {
       setLoading(false); setLoadingMsg("");
-      setApiError("I video c'erano, ma la scrittura delle ricette non e' riuscita. Riprova fra un momento.");
+      setApiError(filtro.vietate.length > 0
+        ? "I video trovati non erano compatibili con le preferenze attive. Prova a toglierne qualcuna e rigenera."
+        : "I video c'erano, ma la scrittura delle ricette non e' riuscita. Riprova fra un momento.");
       notify("Generazione non riuscita.");
       return;
     }

@@ -367,8 +367,32 @@ function scoreCandidato(v) {
 
 const MIN_CANDIDATO = 60;
 
-async function scopriVideo(key, tema, evita) {
-  const query = tema + " ricetta";
+// ── PREFERENZE DELL'UTENTE ─────────────────────────────────────────────────
+// Le preferenze devono agire QUI, prima che il piatto sia scelto: un video di
+// arrosto di maiale non va "adattato" per chi non mangia maiale, va scartato.
+// Le parole vietate dovrebbero arrivare come radici ("gamber"), ma il modello
+// puo' sempre mandare "gamberi": si toglie la vocale finale da entrambe le
+// parti, cosi' singolare e plurale cadono sulla stessa radice. Il confronto e'
+// sull'inizio della parola, mai sulla sottostringa, altrimenti "uva" farebbe
+// scattare "piovra". Qualche falso positivo (pesce/pesche) e' messo in conto:
+// sbagliare per eccesso lascia una ricetta in meno, sbagliare per difetto mette
+// in tavola un ingrediente che l'utente ha escluso.
+function radice(w) {
+  return w.length >= 5 && /[aeiou]$/.test(w) ? w.slice(0, -1) : w;
+}
+function contieneVietata(testo, vietate) {
+  if (!vietate || !vietate.length) return false;
+  const tok = norm(testo).split(" ").filter(Boolean).map(radice);
+  return vietate.map(radice).filter(w => w.length >= 4)
+    .some(w => tok.some(t => t.startsWith(w)));
+}
+
+async function scopriVideo(key, tema, evita, filtro) {
+  const ban = ((filtro && filtro.ban) || []).map(norm).filter(w => w.length >= 4).slice(0, 30);
+  const boost = ((filtro && filtro.boost) || []).map(norm).filter(Boolean).slice(0, 5);
+  const extra = norm((filtro && filtro.extra) || "").slice(0, 60);
+
+  const query = tema + (extra ? " " + extra : "") + " ricetta";
   let grezzi;
   try { grezzi = await ytSearch(key, query); } catch (e) { if (e.status === 403) throw e; return []; }
   if (!grezzi.length) return [];
@@ -381,8 +405,13 @@ async function scopriVideo(key, tema, evita) {
     const d = dett[c.id] || {};
     if (d.embeddable === false || d.live) continue;
     const v = { ...c, durationSec: d.durationSec || 0, lang: d.lang || "", description: (d.description || "").slice(0, 700) };
-    const punteggio = scoreCandidato(v);
+    let punteggio = scoreCandidato(v);
     if (punteggio < MIN_CANDIDATO) continue;
+    // Ingrediente vietato: nel titolo sempre, nella descrizione solo all'inizio
+    // (piu' avanti ci sono link e altre ricette del canale, non questo piatto).
+    if (contieneVietata(v.title, ban)) continue;
+    if (contieneVietata(String(v.description).slice(0, 350), ban)) continue;
+    if (boost.length && boost.some(w => norm(v.title).includes(w))) punteggio += 8;
     // Niente che somigli a un piatto gia' proposto nelle settimane scorse.
     const tit = norm(v.title);
     if (evitaNorm.some(n => n && (tit.includes(n) || contentTokens(n).every(t => tit.includes(t))))) continue;
@@ -462,11 +491,12 @@ export default async function handler(req, res) {
   if (Array.isArray(req.body?.discover)) {
     const temi = req.body.discover.slice(0, 10);
     const evita = Array.isArray(req.body.avoid) ? req.body.avoid.slice(0, 60) : [];
+    const filtro = req.body.filter && typeof req.body.filter === "object" ? req.body.filter : {};
     const out = {};
     let quota = null;
     for (const t of temi) {
       if (quota) break;
-      try { out[t.key ?? t.theme] = await scopriVideo(key, String(t.theme || ""), evita); }
+      try { out[t.key ?? t.theme] = await scopriVideo(key, String(t.theme || ""), evita, filtro); }
       catch (e) { if (e.status === 403) quota = e.detail || "quota"; out[t.key ?? t.theme] = []; }
     }
     return res.status(200).json(quota ? { discovered: out, warning: "quota" } : { discovered: out });
